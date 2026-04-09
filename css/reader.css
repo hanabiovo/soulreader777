@@ -684,20 +684,24 @@
    分页模式
    ═══════════════════════════════════════ */
 
-/* 分页容器：外层隐藏溢出，内层多栏 */
+/* 分页容器：水平 padding 归零，由 page-columns 内部处理 */
 #reader-content.paginated {
   overflow: hidden;
-  height: 100%;
-  padding-bottom: 48px; /* 为底部页码栏留空间 */
+  position: relative;
 }
 
+/* 内层多栏容器 */
 #reader-content.paginated .page-columns {
-  column-width: 100vw;
-  column-gap: 0;
   column-fill: auto;
-  height: 100%;
   transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
+  box-sizing: border-box;
+  /* column-width, column-gap, height, padding 由 JS recalcPages() 动态设置 */
+}
+
+/* 双页模式下的间隔线（通过 column-rule 实现） */
+#reader-content.paginated.dual-page .page-columns {
+  column-rule: 1px solid var(--rule);
 }
 
 /* 底部页码指示栏 */
@@ -755,7 +759,7 @@
 /* 翻页触摸区域 */
 .page-tap-zone {
   position: absolute;
-  top: 0;
+  top: 48px;
   bottom: 40px;
   z-index: 2040;
   cursor: pointer;
@@ -763,10 +767,10 @@
 
 .page-tap-left {
   left: 0;
-  width: 35%;
+  width: 30%;
 }
 
 .page-tap-right {
   right: 0;
-  width: 35%;
+  width: 30%;
 }

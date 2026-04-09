@@ -321,6 +321,15 @@
                 </div>
             </div>
 
+            <!-- 单页/双页（仅分页模式下显示） -->
+            <div class="typo-group" id="typo-columns-group" style="margin-top:10px;display:none;">
+                <div class="typo-label">版式</div>
+                <div class="typo-options">
+                    <button class="typo-btn active" data-param="columns" data-value="single" onclick="Reader.togglePageColumns(false)">单页</button>
+                    <button class="typo-btn" data-param="columns" data-value="dual" onclick="Reader.togglePageColumns(true)">双页</button>
+                </div>
+            </div>
+
             <!-- 阅读字体 -->
             <div class="typo-section-label">阅读字体</div>
             <div id="typo-font-chips" class="typo-chip-row">

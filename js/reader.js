@@ -32,14 +32,13 @@ const Reader = {
     
     // 应用分页模式（如果已开启）
     if (this._paginationMode) {
+      // 设置待恢复的页码，enablePagination → recalcPages 完成后会 goToPage
+      this._currentPage = book.currentPage || 0;
       this.enablePagination();
-      // 恢复页码
-      setTimeout(() => {
-        this._currentPage = book.currentPage || 0;
-        this.goToPage(this._currentPage);
-      }, 150);
     } else {
-      // 恢复滚动位置
+      // 滚动模式：绑定滚动监听并恢复位置
+      this._scrollHandler = () => this.updateProgress();
+      document.getElementById('reader-content').addEventListener('scroll', this._scrollHandler, { passive: true });
       setTimeout(() => {
         const content = document.getElementById('reader-content');
         content.scrollTop = book.scrollPosition || 0;
@@ -49,10 +48,6 @@ const Reader = {
 
     // 恢复高亮
     await this.restoreHighlights(bookId);
-    
-    // 监听滚动进度
-    this._scrollHandler = () => this.updateProgress();
-    document.getElementById('reader-content').addEventListener('scroll', this._scrollHandler, { passive: true });
   },
 
   // ─── 关闭阅读器 ───
@@ -75,7 +70,14 @@ const Reader = {
       const indicator = document.getElementById('page-indicator');
       if (indicator) indicator.classList.remove('active');
       const container = document.getElementById('reader-content');
-      container.classList.remove('paginated');
+      container.classList.remove('paginated', 'dual-page');
+      // 解包 page-columns
+      const wrapper = container.querySelector('.page-columns');
+      if (wrapper) {
+        wrapper.style.transform = '';
+        while (wrapper.firstChild) container.appendChild(wrapper.firstChild);
+        wrapper.remove();
+      }
     }
 
     // 移除滚动监听
@@ -737,6 +739,15 @@ const Reader = {
       btn.classList.toggle('active', (btn.dataset.value === 'paginated') === this._paginationMode);
     });
 
+    // 同步单/双页按钮
+    document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.value === 'dual') === this._dualPage);
+    });
+
+    // 控制「版式」行的可见性（仅分页模式下显示）
+    const colGroup = document.getElementById('typo-columns-group');
+    if (colGroup) colGroup.style.display = this._paginationMode ? '' : 'none';
+
     // 渲染字体/配色 chip
     this.renderTypoFontChips();
     this.renderTypoColorChips();
@@ -879,9 +890,16 @@ const Reader = {
     }
     // 恢复阅读模式
     this._paginationMode = saved.paginationMode || false;
+    this._dualPage = saved.dualPage || false;
   },
 
   // ═══ 分页引擎 ═══
+
+  _dualPage: false,       // 单页/双页模式
+  _paginationMode: false, // 是否分页模式
+  _currentPage: 0,
+  _totalPages: 1,
+  _pageWidth: 0,          // 每次翻页的 translateX 步长
 
   // 切换分页/滚动模式
   togglePaginationMode(mode) {
@@ -899,6 +917,30 @@ const Reader = {
     document.querySelectorAll('.typo-btn[data-param="mode"]').forEach(btn => {
       btn.classList.toggle('active', (btn.dataset.value === 'paginated') === mode);
     });
+    // 显示/隐藏版式选项
+    const colGroup = document.getElementById('typo-columns-group');
+    if (colGroup) colGroup.style.display = mode ? '' : 'none';
+  },
+
+  // 切换单页/双页
+  togglePageColumns(dual) {
+    this._dualPage = dual;
+    const saved = JSON.parse(localStorage.getItem('read-layout') || '{}');
+    saved.dualPage = dual;
+    localStorage.setItem('read-layout', JSON.stringify(saved));
+
+    const container = document.getElementById('reader-content');
+    container.classList.toggle('dual-page', dual);
+
+    // 同步按钮状态
+    document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.value === 'dual') === dual);
+    });
+
+    // 如果当前是分页模式，重算
+    if (this._paginationMode) {
+      this.recalcPages();
+    }
   },
 
   // 启用分页模式
@@ -921,8 +963,11 @@ const Reader = {
       container.removeEventListener('scroll', this._scrollHandler);
     }
 
-    // 计算分页
-    setTimeout(() => this.recalcPages(), 50);
+    // 应用双页类
+    if (this._dualPage) container.classList.add('dual-page');
+
+    // 计算分页（延迟等待 DOM 稳定）
+    setTimeout(() => this.recalcPages(), 80);
 
     // 显示页码指示器
     const indicator = document.getElementById('page-indicator');
@@ -938,11 +983,15 @@ const Reader = {
   disablePagination() {
     const container = document.getElementById('reader-content');
     container.classList.remove('paginated');
+    container.classList.remove('dual-page');
 
     // 解包 page-columns
     const wrapper = container.querySelector('.page-columns');
     if (wrapper) {
       wrapper.style.transform = '';
+      wrapper.style.columnWidth = '';
+      wrapper.style.columnGap = '';
+      wrapper.style.height = '';
       while (wrapper.firstChild) {
         container.appendChild(wrapper.firstChild);
       }
@@ -963,24 +1012,54 @@ const Reader = {
     container.addEventListener('scroll', this._scrollHandler, { passive: true });
   },
 
-  // 计算总页数
+  // 计算总页数（核心：正确处理 padding、单/双页）
   recalcPages() {
     const container = document.getElementById('reader-content');
     const wrapper = container.querySelector('.page-columns');
     if (!wrapper) return;
 
-    this._pageWidth = container.clientWidth;
-    wrapper.style.columnWidth = this._pageWidth + 'px';
-    wrapper.style.columnGap = '0px';
-    wrapper.style.height = container.clientHeight + 'px';
+    // 获取 padding 值
+    const cs = getComputedStyle(container);
+    const padL = parseFloat(cs.paddingLeft) || 0;
+    const padR = parseFloat(cs.paddingRight) || 0;
+    const padT = parseFloat(cs.paddingTop) || 0;
+    const padB = parseFloat(cs.paddingBottom) || 0;
 
-    // 等待浏览器重排
+    // 内容区可用尺寸（扣除 padding）
+    const contentW = container.clientWidth - padL - padR;
+    const contentH = container.clientHeight - padT - padB - 44; // 44px 为底部页码栏高度
+
+    if (this._dualPage) {
+      // 双页：2 列可见，每列 = (contentW - gap) / 2
+      const gap = 32;
+      const colW = Math.floor((contentW - gap) / 2);
+      wrapper.style.columnCount = '2';
+      wrapper.style.columnWidth = colW + 'px';
+      wrapper.style.columnGap = gap + 'px';
+      // 翻页步长：跳过 2 列 = 2 * (colW + gap)
+      this._pageWidth = 2 * (colW + gap);
+    } else {
+      // 单页：1 列 = 整个 contentW，无间距
+      wrapper.style.columnCount = '1';
+      wrapper.style.columnWidth = Math.round(contentW) + 'px';
+      wrapper.style.columnGap = '0px';
+      // 翻页步长 = contentW
+      this._pageWidth = Math.round(contentW);
+    }
+
+    wrapper.style.height = contentH + 'px';
+
+    // 等待浏览器重排后再测量 scrollWidth
     requestAnimationFrame(() => {
-      this._totalPages = Math.max(1, Math.ceil(wrapper.scrollWidth / this._pageWidth));
-      if (this._currentPage >= this._totalPages) {
-        this._currentPage = this._totalPages - 1;
-      }
-      this.goToPage(this._currentPage);
+      requestAnimationFrame(() => {
+        const sw = wrapper.scrollWidth;
+        this._totalPages = Math.max(1, Math.ceil(sw / this._pageWidth));
+
+        if (this._currentPage >= this._totalPages) {
+          this._currentPage = this._totalPages - 1;
+        }
+        this.goToPage(this._currentPage);
+      });
     });
   },
 
