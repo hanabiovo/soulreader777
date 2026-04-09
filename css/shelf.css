@@ -1,0 +1,213 @@
+/* ═══════════════════════════════════════
+   SHELF.CSS - 书架页
+   ═══════════════════════════════════════ */
+
+/* 书架顶部控制栏 */
+#shelf-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* 排序切换 */
+#shelf-sort {
+  display: flex;
+  gap: 14px;
+}
+
+.sort-btn {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  border: none;
+  background: none;
+  font-family: var(--font-ui);
+  transition: color 0.2s;
+  padding: 0;
+}
+
+.sort-btn.active {
+  color: var(--ink);
+  font-weight: 400;
+}
+
+/* 视图切换 + 导入按钮 */
+#shelf-actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.view-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+  transition: color 0.2s;
+  flex-shrink: 0;
+}
+
+.view-toggle-btn.active {
+  color: var(--ink);
+}
+
+.view-toggle-btn:hover {
+  color: var(--ink-mid);
+}
+
+.import-btn {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  border: none;
+  background: none;
+  font-family: var(--font-ui);
+  transition: color 0.2s;
+  padding: 0;
+}
+
+.import-btn:hover {
+  color: var(--ink);
+}
+
+/* ─── 列表视图 ─── */
+#shelf-list.list-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.book-item-list {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.book-item-list:hover {
+  opacity: 0.6;
+}
+
+.book-info {
+  flex: 1;
+  min-width: 0;
+  padding-right: 12px;
+}
+
+.book-title {
+  font-family: var(--font-title);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.book-meta {
+  font-size: 0.68rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.book-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.book-progress {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-mid);
+  letter-spacing: 0.02em;
+  min-width: 32px;
+  text-align: right;
+}
+
+.book-delete {
+  font-size: 0.68rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: color 0.2s;
+  letter-spacing: 0.04em;
+}
+
+.book-delete:hover {
+  color: #a0291f;
+}
+
+/* ─── 网格视图 ─── */
+#shelf-list.grid-view {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 12px;
+  padding-bottom: 150px;
+}
+
+.book-cover {
+  aspect-ratio: 2/3;
+  border-radius: 4px;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 10px 8px;
+  position: relative;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  overflow: hidden;
+}
+
+.book-cover:hover {
+  opacity: 0.85;
+}
+
+.book-cover-title {
+  font-family: var(--font-title);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+
+/* ─── 空状态 ─── */
+.empty-shelf {
+  padding: 80px 20px;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 300;
+  color: var(--ink-ghost);
+  letter-spacing: 0.08em;
+  line-height: 2.2;
+}

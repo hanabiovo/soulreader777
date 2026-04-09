@@ -1,0 +1,270 @@
+/* ═══════════════════════════════════════
+   NOTES.CSS - 笔记本页
+   ═══════════════════════════════════════ */
+
+/* 笔记本顶部控制 */
+#notes-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.notes-title {
+  font-family: var(--font-title);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+}
+
+.new-note-btn {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  border: none;
+  background: none;
+  font-family: var(--font-ui);
+  transition: color 0.2s;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.new-note-btn:hover {
+  color: var(--ink);
+}
+
+/* ─── 空状态 ─── */
+.notes-empty {
+  padding: 60px 0;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 300;
+  color: var(--ink-ghost);
+  letter-spacing: 0.08em;
+  line-height: 2.2;
+}
+
+/* ─── 笔记分组 ─── */
+.note-group {
+  margin-top: 0;
+}
+
+.note-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.note-group-left {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.note-group-title {
+  font-family: var(--font-title);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+
+.note-group-count {
+  font-size: 0.68rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+}
+
+/* 折叠箭头 SVG */
+.note-group-arrow {
+  display: flex;
+  align-items: center;
+  color: var(--ink-faint);
+  transition: transform 0.25s;
+  flex-shrink: 0;
+}
+
+.note-group.collapsed .note-group-arrow {
+  transform: rotate(-90deg);
+}
+
+.note-group.collapsed .note-list {
+  display: none;
+}
+
+/* ─── 笔记列表 ─── */
+.note-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.note-item {
+  padding: 15px 0;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.note-item:hover {
+  opacity: 0.65;
+}
+
+/* 原文摘录 - 斜体 + 左细线 */
+.note-quote {
+  font-size: 0.83rem;
+  font-style: italic;
+  color: var(--ink-mid);
+  margin-bottom: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--rule);
+  line-height: 1.65;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 笔记正文预览 */
+.note-preview {
+  font-size: 0.78rem;
+  font-weight: 300;
+  color: var(--ink-mid);
+  line-height: 1.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 6px;
+}
+
+/* 底部元数据行：类型标记 + 时间戳 */
+.note-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.note-type {
+  font-size: 0.65rem;
+  font-weight: 300;
+  color: var(--ink-ghost);
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  border: 1px solid var(--rule);
+  padding: 1px 5px;
+}
+
+.note-time {
+  font-size: 0.65rem;
+  font-weight: 300;
+  color: var(--ink-ghost);
+  letter-spacing: 0.04em;
+}
+
+/* ─── 自由笔记编辑器（全屏覆盖） ─── */
+#free-note-editor {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 1000;
+  display: none;
+  flex-direction: column;
+  padding: 0;
+}
+
+#free-note-editor.active {
+  display: flex;
+}
+
+/* 自由笔记顶部栏 */
+#free-note-header {
+  height: 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+#free-note-close {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: color 0.2s;
+}
+
+#free-note-close:hover {
+  color: var(--ink);
+}
+
+#free-note-save {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  border: none;
+  background: none;
+  font-family: var(--font-ui);
+  transition: color 0.2s;
+  padding: 0;
+}
+
+#free-note-save:hover {
+  color: var(--ink);
+}
+
+/* 正文区 - 灵感之海「手记」风格 */
+#free-note-textarea {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  font-weight: 300;
+  color: var(--ink);
+  line-height: 2;
+  letter-spacing: 0.02em;
+  resize: none;
+  padding: 24px 24px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling: touch;
+}
+
+#free-note-textarea::placeholder {
+  color: var(--ink-ghost);
+}
+
+/* 底部状态栏 */
+#free-note-footer {
+  padding: 10px 20px;
+  border-top: 1px solid var(--rule);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+}
+
+#free-note-count {
+  font-size: 0.68rem;
+  font-weight: 300;
+  color: var(--ink-ghost);
+  letter-spacing: 0.04em;
+}

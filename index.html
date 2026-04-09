@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#f7f5f0">
+    <title>SoulReader · 灵犀</title>
+    
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192.svg">
+    
+    <!-- 外部依赖 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+    </script>
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/shelf.css">
+    <link rel="stylesheet" href="css/reader.css">
+    <link rel="stylesheet" href="css/sidebar.css">
+    <link rel="stylesheet" href="css/notes.css">
+    <link rel="stylesheet" href="css/settings.css">
+</head>
+<body>
+
+    <!-- Toast 提示 -->
+    <div id="toast"></div>
+
+    <!-- 主视图容器 -->
+    <div id="main-view">
+        
+        <!-- 📚 书架页 -->
+        <div id="view-shelf" class="view-page active">
+            <div id="shelf-controls">
+                <div id="shelf-sort">
+                    <button class="sort-btn active" data-sort="recent" onclick="App.changeSort('recent')">最近打开</button>
+                    <button class="sort-btn" data-sort="time" onclick="App.changeSort('time')">导入时间</button>
+                    <button class="sort-btn" data-sort="name" onclick="App.changeSort('name')">书名</button>
+                </div>
+                <div id="shelf-actions">
+                    <button class="view-toggle-btn" id="view-btn-list" data-view="list" onclick="App.setShelfView('list')" title="列表视图">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2">
+                            <line x1="1" y1="3" x2="13" y2="3"/>
+                            <line x1="1" y1="7" x2="13" y2="7"/>
+                            <line x1="1" y1="11" x2="13" y2="11"/>
+                        </svg>
+                    </button>
+                    <button class="view-toggle-btn" id="view-btn-grid" data-view="grid" onclick="App.setShelfView('grid')" title="网格视图">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2">
+                            <rect x="1" y="1" width="5" height="5"/>
+                            <rect x="8" y="1" width="5" height="5"/>
+                            <rect x="1" y="8" width="5" height="5"/>
+                            <rect x="8" y="8" width="5" height="5"/>
+                        </svg>
+                    </button>
+                    <button class="import-btn" onclick="document.getElementById('file-input').click()">＋ 导入</button>
+                    <input type="file" id="file-input" accept=".txt,.pdf,.epub" style="display: none;">
+                </div>
+            </div>
+            <div id="shelf-list" class="grid-view"></div>
+            <div id="empty-shelf" class="empty-shelf" style="display: none;">
+                书架空空的哦~<br>点击右上角导入你的第一本书吧！
+            </div>
+        </div>
+
+        <!-- 📝 笔记本页 -->
+        <div id="view-notes" class="view-page">
+            <div id="notes-controls">
+                <span class="notes-title">笔记</span>
+                <button class="new-note-btn" onclick="Notes.showFreeNoteEditor()">＋ 新建</button>
+            </div>
+            <div id="notes-list"></div>
+        </div>
+
+        <!-- 自由笔记编辑器（全屏覆盖，独立于 view-page） -->
+        <div id="free-note-editor">
+            <div id="free-note-header">
+                <span id="free-note-close" onclick="Notes.closeFreeNoteEditor()">← 返回</span>
+                <button id="free-note-save" onclick="Notes.saveFreeNote()">保存</button>
+            </div>
+            <textarea id="free-note-textarea" placeholder="随便写点什么…"></textarea>
+            <div id="free-note-footer">
+                <span id="free-note-count"></span>
+            </div>
+        </div>
+
+        <!-- ⚙️ 设置页（左右分栏） -->
+        <div id="view-settings" class="view-page" style="padding: 0; overflow: hidden;">
+            <!-- 左侧 tab 列表 -->
+            <div id="settings-nav">
+                <div class="settings-nav-item active" data-stab="ai" onclick="Settings.switchTab('ai')">AI</div>
+                <div class="settings-nav-item" data-stab="appearance" onclick="Settings.switchTab('appearance')">外观</div>
+                <div class="settings-nav-item" data-stab="data" onclick="Settings.switchTab('data')">数据</div>
+            </div>
+            <!-- 右侧内容区 -->
+            <div id="settings-content">
+
+                <!-- AI tab -->
+                <div class="stab-page active" id="stab-ai">
+                    <div class="sp-section-label">AI CONFIG</div>
+                    <div class="sp-rows">
+                        <div class="sp-row">
+                            <div class="sp-row-info"><div class="sp-row-label">API URL</div></div>
+                            <input class="sp-input" type="text" id="ai-url-input" placeholder="https://api.openai.com/v1/chat/completions">
+                        </div>
+                        <div class="sp-row">
+                            <div class="sp-row-info"><div class="sp-row-label">API Key</div></div>
+                            <input class="sp-input" type="password" id="ai-key-input" placeholder="sk-...">
+                        </div>
+                        <div class="sp-row">
+                            <div class="sp-row-info"><div class="sp-row-label">模型</div></div>
+                            <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+                                <button class="sp-action-btn" onclick="Settings.fetchModels()">拉取</button>
+                                <input class="sp-input" type="text" id="ai-model-input" placeholder="gpt-4o" list="ai-model-list" style="max-width:120px;">
+                                <datalist id="ai-model-list"></datalist>
+                            </div>
+                        </div>
+                        <div class="sp-row" style="justify-content:flex-end;padding-top:8px;padding-bottom:8px;">
+                            <button class="sp-action-btn sp-apply-btn" onclick="Settings.applyAIConfig()">应用</button>
+                        </div>
+                    </div>
+
+                    <div class="sp-section-label">人设库</div>
+                    <div id="persona-list"></div>
+                    <div class="sp-persona-add" onclick="Settings.addPersona()">＋ 新增人设</div>
+                </div>
+
+                <!-- 外观 tab -->
+                <div class="stab-page" id="stab-appearance">
+                    <div class="sp-section-label">明暗模式</div>
+                    <div class="sp-rows">
+                        <div class="sp-row">
+                            <div class="sp-row-info"><div class="sp-row-label">主题</div></div>
+                            <div class="sp-toggle-group">
+                                <button class="sp-toggle-btn" data-theme="light" onclick="Settings.setTheme('light')">浅色</button>
+                                <button class="sp-toggle-btn" data-theme="dark" onclick="Settings.setTheme('dark')">深色</button>
+                                <button class="sp-toggle-btn" data-theme="system" onclick="Settings.setTheme('system')">系统</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sp-section-label">字体方案</div>
+                    <!-- 已保存方案横排 -->
+                    <div class="font-scheme-row" id="font-scheme-row"></div>
+                    <!-- 三槽 select -->
+                    <div class="font-slots-card">
+                        <div class="font-slot-row">
+                            <span class="font-slot-label">标题</span>
+                            <select class="font-select" id="font-sel-title" onchange="Settings.onFontSelect('slotTitle',this.value)"></select>
+                        </div>
+                        <div class="font-slot-row" style="margin-top:10px;">
+                            <span class="font-slot-label">正文</span>
+                            <select class="font-select" id="font-sel-body" onchange="Settings.onFontSelect('slotBody',this.value)"></select>
+                        </div>
+                        <div class="font-slot-row" style="margin-top:10px;">
+                            <span class="font-slot-label">界面</span>
+                            <select class="font-select" id="font-sel-ui" onchange="Settings.onFontSelect('slotUi',this.value)"></select>
+                        </div>
+                        <div class="font-action-row">
+                            <button class="font-action-btn" onclick="Settings.openSaveFontScheme()">保存当前方案</button>
+                            <button class="font-action-btn" onclick="Settings.openFontLibrary()">字体库</button>
+                        </div>
+                    </div>
+
+                    <div class="sp-section-label">配色方案</div>
+                    <div class="sp-swatch-presets">
+                        <div class="sp-swatch" style="background:#f7f5f0;" title="纸白" onclick="Settings.applyColorPreset(COLOR_PRESETS[0])"></div>
+                        <div class="sp-swatch" style="background:#1a1c1e;" title="暗夜" onclick="Settings.applyColorPreset(COLOR_PRESETS[1])"></div>
+                        <div class="sp-swatch" style="background:#3a3a3a;" title="石墨" onclick="Settings.applyColorPreset(COLOR_PRESETS[2])"></div>
+                        <div class="sp-swatch" style="background:#fdf6e3;" title="奶油" onclick="Settings.applyColorPreset(COLOR_PRESETS[3])"></div>
+                        <div class="sp-swatch" style="background:#eef2f5;" title="冷灰" onclick="Settings.applyColorPreset(COLOR_PRESETS[4])"></div>
+                        <div class="sp-swatch" style="background:#f5ede3;" title="暖褐" onclick="Settings.applyColorPreset(COLOR_PRESETS[5])"></div>
+                    </div>
+                    <div class="sp-rows" style="margin-top:4px;">
+                        <div class="sp-row">
+                            <div class="sp-row-info"><div class="sp-row-label">随机生成</div></div>
+                            <button class="sp-action-btn" onclick="Settings.randomColorScheme()">随机</button>
+                        </div>
+                        <div class="sp-row">
+                            <div class="sp-row-info"><div class="sp-row-label">保存当前配色</div></div>
+                            <button class="sp-action-btn" onclick="Settings.saveColorScheme()">保存</button>
+                        </div>
+                    </div>
+                    <div id="color-scheme-list" class="sp-chip-row"></div>
+                </div>
+
+                <!-- 数据 tab -->
+                <div class="stab-page" id="stab-data">
+                    <div class="sp-section-label">DATA</div>
+                    <div class="sp-rows">
+                        <div class="sp-row">
+                            <div class="sp-row-info">
+                                <div class="sp-row-label">导出备份</div>
+                                <div class="sp-row-sub">将书籍、笔记导出为 JSON</div>
+                            </div>
+                            <button class="sp-action-btn" onclick="Settings.exportData()">导出</button>
+                        </div>
+                        <div class="sp-row">
+                            <div class="sp-row-info">
+                                <div class="sp-row-label">导入备份</div>
+                                <div class="sp-row-sub">从 JSON 文件恢复数据</div>
+                            </div>
+                            <button class="sp-action-btn" onclick="document.getElementById('import-data-input').click()">导入</button>
+                            <input type="file" id="import-data-input" accept=".json" style="display:none" onchange="Settings.importData(this.files[0])">
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 底部导航 -->
+    <div id="tab-bar">
+        <div class="tab-item active" data-tab="shelf" onclick="App.switchTab('shelf')"><i class="fa-solid fa-book-open"></i></div>
+        <div class="tab-item" data-tab="notes" onclick="App.switchTab('notes')"><i class="fa-solid fa-quote-right"></i></div>
+        <div class="tab-item" data-tab="settings" onclick="App.switchTab('settings')"><i class="fa-solid fa-bars-staggered"></i></div>
+    </div>
+
+    <!-- 阅读器覆盖层 -->
+    <div id="reader-overlay">
+        <div id="reader-header">
+            <span id="reader-back" onclick="Reader.close()">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="11 4 6 9 11 14"/>
+                </svg>
+            </span>
+            <span id="reader-title"></span>
+            <div id="reader-actions">
+                <button class="reader-action-btn" onclick="Reader.showTypography()">字</button>
+                <button class="reader-action-btn" onclick="Reader.showTOC()">目录</button>
+                <button class="reader-action-btn" onclick="Reader.showMemoryPanel()">记忆</button>
+            </div>
+            <div id="reader-progress">
+                <div id="reader-progress-bar"></div>
+            </div>
+        </div>
+        <div id="reader-content"></div>
+    </div>
+
+    <!-- 选词 Dock -->
+    <div id="selection-dock">
+        <button class="dock-action" onclick="Reader.createNote('note')">存入笔记</button>
+        <button class="dock-action" onclick="Reader.createNote('ai')">问 AI</button>
+        <button class="dock-action" onclick="navigator.clipboard.writeText(Reader.selectedText); App.showToast('已复制')">复制</button>
+    </div>
+
+    <!-- 排版快捷面板（「字」按钮触发，可滚动） -->
+    <div id="typography-panel">
+        <div id="typography-handle"></div>
+        <div id="typography-scroll">
+
+            <!-- 字号 -->
+            <div class="typo-group">
+                <div class="typo-label">字号</div>
+                <div class="typo-options">
+                    <button class="typo-btn" data-param="size" data-value="16px" onclick="Reader.setTypoParam('size','16px',this)">小</button>
+                    <button class="typo-btn active" data-param="size" data-value="19px" onclick="Reader.setTypoParam('size','19px',this)">标准</button>
+                    <button class="typo-btn" data-param="size" data-value="22px" onclick="Reader.setTypoParam('size','22px',this)">大</button>
+                    <button class="typo-btn" data-param="size" data-value="26px" onclick="Reader.setTypoParam('size','26px',this)">特大</button>
+                </div>
+            </div>
+            <div class="typo-slider-row">
+                <input type="range" class="typo-slider" min="14" max="32" step="1" value="19"
+                    oninput="Reader.setTypoParam('size',this.value+'px',null);Reader.syncSliderLabel('size-val',this.value+'px')">
+                <span class="typo-slider-val" id="size-val">19px</span>
+            </div>
+
+            <!-- 行高 -->
+            <div class="typo-group" style="margin-top:10px;">
+                <div class="typo-label">行高</div>
+                <div class="typo-options">
+                    <button class="typo-btn" data-param="line" data-value="1.6" onclick="Reader.setTypoParam('line','1.6',this)">紧</button>
+                    <button class="typo-btn active" data-param="line" data-value="1.85" onclick="Reader.setTypoParam('line','1.85',this)">标准</button>
+                    <button class="typo-btn" data-param="line" data-value="2.2" onclick="Reader.setTypoParam('line','2.2',this)">舒展</button>
+                </div>
+            </div>
+            <div class="typo-slider-row">
+                <input type="range" class="typo-slider" min="1.4" max="2.5" step="0.05" value="1.85"
+                    oninput="Reader.setTypoParam('line',this.value,null);Reader.syncSliderLabel('line-val',this.value)">
+                <span class="typo-slider-val" id="line-val">1.85</span>
+            </div>
+
+            <!-- 页边距 -->
+            <div class="typo-group" style="margin-top:10px;">
+                <div class="typo-label">页边距</div>
+                <div class="typo-options">
+                    <button class="typo-btn" data-param="padding" data-value="16px" onclick="Reader.setTypoParam('padding','16px',this)">窄</button>
+                    <button class="typo-btn active" data-param="padding" data-value="24px" onclick="Reader.setTypoParam('padding','24px',this)">标准</button>
+                    <button class="typo-btn" data-param="padding" data-value="40px" onclick="Reader.setTypoParam('padding','40px',this)">宽</button>
+                </div>
+            </div>
+            <div class="typo-slider-row">
+                <input type="range" class="typo-slider" min="12" max="60" step="2" value="24"
+                    oninput="Reader.setTypoParam('padding',this.value+'px',null);Reader.syncSliderLabel('padding-val',this.value+'px')">
+                <span class="typo-slider-val" id="padding-val">24px</span>
+            </div>
+
+            <!-- 阅读字体 -->
+            <div class="typo-section-label">阅读字体</div>
+            <div id="typo-font-chips" class="typo-chip-row">
+                <span class="typo-empty-tip">请先在设置页导入字体</span>
+            </div>
+
+            <!-- 阅读配色 -->
+            <div class="typo-section-label">阅读配色</div>
+            <div class="typo-chip-row" id="typo-color-chips">
+                <div class="typo-color-chip active" data-bg="#f7f5f0" data-ink="#1a1a18"
+                    style="background:#f7f5f0;border-color:#ccc;"
+                    onclick="Reader.setReadColor('#f7f5f0','#1a1a18',this)" title="纸白"></div>
+                <div class="typo-color-chip" data-bg="#e8f0e8" data-ink="#1a2a1a"
+                    style="background:#e8f0e8;"
+                    onclick="Reader.setReadColor('#e8f0e8','#1a2a1a',this)" title="护眼绿"></div>
+                <div class="typo-color-chip" data-bg="#2a1f16" data-ink="#c8b89a"
+                    style="background:#2a1f16;"
+                    onclick="Reader.setReadColor('#2a1f16','#c8b89a',this)" title="夜间棕"></div>
+                <div class="typo-color-chip" data-bg="#000000" data-ink="#e0e0e0"
+                    style="background:#000000;"
+                    onclick="Reader.setReadColor('#000000','#e0e0e0',this)" title="纯黑"></div>
+            </div>
+            <div id="typo-user-color-chips" class="typo-chip-row"></div>
+
+        </div><!-- end #typography-scroll -->
+    </div>
+    <div id="typography-backdrop" onclick="Reader.closeTypography()"></div>
+
+    <!-- 本书大脑面板（记忆按钮触发，底部上滑） -->
+    <div id="memory-panel">
+        <div id="memory-handle"></div>
+        <div id="memory-scroll">
+
+            <!-- 书籍背景 -->
+            <div class="memory-section-label">书籍背景</div>
+            <textarea id="memory-context" placeholder="这本书讲了什么…" rows="4" onblur="Reader.saveContext()"></textarea>
+            <button class="memory-action-btn" id="memory-auto-extract" onclick="Reader.autoExtractContext()">AI 自动提取全书背景</button>
+
+            <!-- 记忆卡片 -->
+            <div class="memory-section-label" style="margin-top:16px;">记忆卡片</div>
+            <div id="memory-card-list"></div>
+            <button class="memory-action-btn" onclick="Reader.addEmptyMemory()">＋ 添加记忆</button>
+
+        </div><!-- end #memory-scroll -->
+    </div>
+    <div id="memory-panel-backdrop" onclick="Reader.closeMemoryPanel()"></div>
+
+    <!-- 目录面板 -->
+    <div id="toc-panel">
+        <div id="toc-header">
+            <span id="toc-title">目录</span>
+            <span id="toc-close" onclick="document.getElementById('toc-panel').classList.remove('active')">× 关闭</span>
+        </div>
+        <div id="toc-list"></div>
+    </div>
+
+    <!-- AI 侧边栏遮罩 -->
+    <div id="ai-sidebar-backdrop" onclick="Reader.closeAIChat()"></div>
+
+    <!-- AI 聊天侧边栏 -->
+    <div id="ai-sidebar">
+        <div id="sidebar-header">
+            <div id="sidebar-quote"></div>
+            <div id="sidebar-actions">
+                <button class="sidebar-btn" onclick="Reader.summarizeThread()">提炼记忆</button>
+                <button class="sidebar-btn" onclick="Reader.closeAIChat()">× 关闭</button>
+            </div>
+        </div>
+        <div id="memory-warning">记忆已超过 8 条，建议适时清理</div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-area">
+            <textarea id="chat-input" placeholder="跟 AI 聊聊这段话..." rows="1"></textarea>
+            <div id="chat-input-footer">
+                <button id="chat-send" onclick="Reader.sendChatMessage()">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 字体库弹层 -->
+    <div id="font-lib-overlay" onclick="if(event.target===this)Settings.closeFontLibrary()" style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:300;align-items:flex-end;justify-content:center;">
+        <div class="font-lib-popup" id="font-lib-popup">
+            <div class="font-lib-title">字体库</div>
+            <div class="font-lib-list" id="font-lib-list"></div>
+            <div class="font-custom-section">
+                <div class="font-custom-label">添加外链字体</div>
+                <textarea class="font-url-input" id="font-url-input" rows="3"
+                    placeholder="粘贴字体 CSS 代码或直接填 URL…"></textarea>
+                <div class="font-url-row" style="margin-top:6px;">
+                    <input class="font-name-input" id="font-name-input" type="text"
+                        placeholder="字体名称（选填，可自动识别）">
+                    <button class="font-url-add-btn" onclick="Settings.addCustomFont()">添加</button>
+                </div>
+                <div class="font-custom-hint">支持粘贴 @import url(…) 格式的 CSS 代码，或直接填 CSS 文件链接</div>
+            </div>
+            <button class="font-lib-close" onclick="Settings.closeFontLibrary()">关闭</button>
+        </div>
+    </div>
+
+    <!-- 字体方案命名弹窗 -->
+    <div id="font-scheme-name-overlay" onclick="if(event.target===this)Settings.closeSaveFontScheme()">
+        <div class="font-scheme-name-popup">
+            <div class="font-scheme-name-title">保存字体方案</div>
+            <input class="font-scheme-name-input" id="font-scheme-name-input" placeholder="方案名称…" maxlength="12"
+                onkeydown="if(event.key==='Enter')Settings.confirmSaveFontScheme()">
+            <div class="font-scheme-name-btns">
+                <button onclick="Settings.closeSaveFontScheme()">取消</button>
+                <button onclick="Settings.confirmSaveFontScheme()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="js/store.js"></script>
+    <script src="js/parser.js"></script>
+    <script src="js/ai.js"></script>
+    <script src="js/reader.js"></script>
+    <script src="js/notes.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/app.js"></script>
+    
+    <!-- 调试日志面板（URL 含 ?debug=1 时显示） -->
+    <div id="debug-panel">
+        <div id="debug-header">
+            <span onclick="App.toggleDebugPanel()">调试日志</span>
+            <span onclick="App.clearDebugLog()" style="cursor:pointer;opacity:0.6;">清空</span>
+        </div>
+        <div id="debug-log-list"></div>
+    </div>
+
+    <!-- Service Worker 注册 -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log('Service Worker 注册成功'))
+                .catch(err => console.log('Service Worker 注册失败:', err));
+        }
+    </script>
+
+</body>
+</html>

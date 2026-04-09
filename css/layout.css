@@ -1,0 +1,107 @@
+/* ═══════════════════════════════════════
+   LAYOUT.CSS - 底部导航、视图切换、通用动画
+   ═══════════════════════════════════════ */
+
+/* 主容器 */
+#main-view {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 视图页面 */
+.view-page {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  background: var(--bg);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 20px;
+  padding-bottom: 120px;
+}
+
+.view-page.active {
+  display: flex;
+  animation: viewIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes viewIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 底部导航 - 灵感之海风格 */
+#tab-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background: var(--bg);
+  border-top: 1px solid var(--rule);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 900;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tab-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-title);
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--ink);
+  opacity: 0.25;
+  flex: 1;
+  height: 100%;
+  transition: opacity 0.25s;
+  cursor: pointer;
+  letter-spacing: 0.12em;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tab-item.active {
+  opacity: 1;
+}
+
+/* Toast 提示 - 极简线稿风格 */
+#toast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  padding: 10px 20px;
+  font-size: 0.8rem;
+  font-weight: 300;
+  letter-spacing: 0.06em;
+  z-index: 9999;
+  display: none;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#toast.show {
+  display: block;
+  animation: toastIn 0.2s ease;
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

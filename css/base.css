@@ -1,0 +1,124 @@
+/* ═══════════════════════════════════════
+   BASE.CSS - CSS 变量、Reset、字体引入
+   ═══════════════════════════════════════ */
+
+/* 字体引入 */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;600&family=Noto+Sans+SC:wght@200;300;400&display=swap');
+
+/* CSS 变量体系 */
+:root {
+  /* 颜色 */
+  --bg:         #f7f5f0;
+  --ink:        #1a1a18;
+  --ink-mid:    #6b6960;
+  --ink-faint:  #b8b5ae;
+  --ink-ghost:  #dedad4;
+  --rule:       #e8e5de;
+
+  /* 字体 */
+  --font-ui:    'Noto Sans SC', sans-serif;
+  --font-body:  'Noto Sans SC', sans-serif;
+  --font-title: 'Noto Serif SC', serif;
+
+  /* 阅读排版（独立变量，不与 UI 层混用） */
+  --read-size:      19px;
+  --read-line:      1.85;
+  --read-para:      1.2em;
+  --read-px:        24px;
+  --read-tracking:  0.01em;
+}
+
+/* 暗色模式 */
+[data-theme="dark"] {
+  --bg:        #141412;
+  --ink:       #e8e5de;
+  --ink-mid:   #8a8880;
+  --ink-faint: #5a5855;
+  --ink-ghost: #2e2c2a;
+  --rule:      #252320;
+}
+
+/* Reset */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--ink);
+  margin: 0;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-top: max(10px, env(safe-area-inset-top));
+  transition: background 0.5s ease, color 0.5s ease;
+}
+
+/* 滚动条隐藏 */
+::-webkit-scrollbar {
+  display: none;
+}
+* {
+  scrollbar-width: none;
+}
+
+/* ─── 调试日志面板 ─── */
+#debug-panel {
+  display: none;
+  position: fixed;
+  right: 8px;
+  bottom: 60px;
+  width: 340px;
+  max-height: 260px;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  z-index: 99999;
+  font-family: 'Menlo', 'Consolas', monospace;
+  font-size: 11px;
+  color: var(--ink);
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+#debug-panel.active { display: flex; flex-direction: column; }
+#debug-panel.minimized { max-height: 28px; }
+#debug-panel.minimized #debug-log-list { display: none; }
+
+#debug-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--rule);
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+#debug-log-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  scrollbar-width: thin;
+}
+#debug-log-list::-webkit-scrollbar { display: block; width: 4px; }
+#debug-log-list::-webkit-scrollbar-thumb { background: var(--ink-faint); border-radius: 2px; }
+
+.debug-entry {
+  padding: 2px 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-mid);
+}
+.debug-entry.debug-error { color: #d63031; }
+.debug-entry.debug-warn  { color: #e17055; }
+.debug-entry.debug-info  { color: var(--ink-mid); }

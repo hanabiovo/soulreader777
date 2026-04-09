@@ -1,0 +1,245 @@
+/* ═══════════════════════════════════════
+   SIDEBAR.CSS - AI 聊天侧边栏
+   ═══════════════════════════════════════ */
+
+/* AI 侧边栏 - 右侧抽屉，线稿风格 */
+#ai-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 85%;
+  max-width: 400px;
+  background: var(--bg);
+  border-left: 1px solid var(--rule);
+  z-index: 2500;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  visibility: hidden;
+}
+
+#ai-sidebar.active {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+/* 侧边栏遮罩 */
+#ai-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.15);
+  z-index: 2490;
+  display: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+#ai-sidebar-backdrop.active {
+  display: block;
+  opacity: 1;
+}
+
+/* ─── 头部 ─── */
+#sidebar-header {
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+/* 划选原句 - 斜体引用 + 左细线 */
+#sidebar-quote {
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--ink-mid);
+  line-height: 1.65;
+  margin-bottom: 12px;
+  padding-left: 12px;
+  border-left: 2px solid var(--rule);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+#sidebar-quote:empty {
+  display: none;
+  margin: 0;
+}
+
+/* 操作行 */
+#sidebar-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sidebar-btn {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  border: none;
+  background: none;
+  font-family: var(--font-ui);
+  transition: color 0.2s;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sidebar-btn:hover {
+  color: var(--ink);
+}
+
+/* 记忆条数提示（P6 用） */
+#memory-warning {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--rule);
+  display: none;
+}
+
+#memory-warning.visible {
+  display: block;
+}
+
+/* ─── 聊天消息区 ─── */
+#chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 20px;
+}
+
+.chat-message {
+  margin-bottom: 22px;
+  animation: messageIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes messageIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* AI 消息 - 左对齐无气泡，左细线 */
+.chat-message.ai {
+  text-align: left;
+}
+
+.chat-message.ai .message-content {
+  font-size: 0.88rem;
+  line-height: 1.75;
+  color: var(--ink);
+  padding-left: 12px;
+  border-left: 2px solid var(--rule);
+  display: block;
+}
+
+/* 用户消息 - 右对齐，--ink-mid，无气泡 */
+.chat-message.user {
+  text-align: right;
+}
+
+.chat-message.user .message-content {
+  font-size: 0.88rem;
+  line-height: 1.75;
+  color: var(--ink-mid);
+  display: inline-block;
+  text-align: right;
+  max-width: 90%;
+}
+
+/* 消息操作 - 极小文字，hover 显现 */
+.message-actions {
+  margin-top: 6px;
+  font-size: 0.68rem;
+  color: var(--ink-ghost);
+  display: flex;
+  gap: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  letter-spacing: 0.04em;
+}
+
+.chat-message.user .message-actions {
+  justify-content: flex-end;
+}
+
+.chat-message:hover .message-actions {
+  opacity: 1;
+}
+
+.msg-action {
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.msg-action:hover {
+  color: var(--ink-mid);
+}
+
+/* ─── 输入区 ─── */
+#chat-input-area {
+  padding: 14px 20px;
+  border-top: 1px solid var(--rule);
+  flex-shrink: 0;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+
+/* 灵感之海同款输入框 - border-bottom 只有底线 */
+#chat-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1.5px solid var(--ink);
+  background: transparent;
+  outline: none;
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  font-weight: 300;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+  padding: 6px 0;
+  resize: none;
+  min-height: 22px;
+  max-height: 100px;
+  line-height: 1.6;
+}
+
+#chat-input::placeholder {
+  color: var(--ink-ghost);
+  font-weight: 300;
+}
+
+#chat-input-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+#chat-send {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-mid);
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  border: none;
+  background: none;
+  font-family: var(--font-ui);
+  transition: color 0.2s;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#chat-send:hover {
+  color: var(--ink);
+}

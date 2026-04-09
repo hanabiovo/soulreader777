@@ -1,0 +1,750 @@
+/* ═══════════════════════════════════════
+   SETTINGS.CSS - 设置页（左右分栏）
+   ═══════════════════════════════════════ */
+
+/* ─── 设置页布局 ─── */
+#view-settings {
+  flex-direction: row !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 左侧 tab 导航 - 约 80px */
+#settings-nav {
+  width: 72px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  padding-top: 16px;
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  font-family: var(--font-title);
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--ink);
+  opacity: 0.35;
+  padding: 14px 0 14px 16px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  border-left: 2px solid transparent;
+  transition: opacity 0.2s, border-color 0.2s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  line-height: 1.4;
+}
+
+.settings-nav-item.active {
+  opacity: 1;
+  border-left-color: var(--ink);
+}
+
+/* 右侧内容区 - 独立滚动 */
+#settings-content {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(80px + env(safe-area-inset-bottom));
+}
+
+/* Tab 内容页 */
+.stab-page {
+  display: none;
+}
+
+.stab-page.active {
+  display: block;
+}
+
+/* ─── 分区标签 ─── */
+.sp-section-label {
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  color: var(--ink-ghost);
+  text-transform: uppercase;
+  padding: 20px 20px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* ─── 行列表 ─── */
+.sp-rows {
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 4px;
+}
+
+.sp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+
+.sp-row:last-child {
+  border-bottom: none;
+}
+
+.sp-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sp-row-label {
+  font-size: 0.83rem;
+  font-weight: 300;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+
+.sp-row-sub {
+  font-size: 0.65rem;
+  font-weight: 200;
+  color: var(--ink-faint);
+  margin-top: 2px;
+  letter-spacing: 0.03em;
+  line-height: 1.6;
+}
+
+/* ─── 文字切换组（单选）─── */
+.sp-toggle-group {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.sp-toggle-btn {
+  font-size: 0.72rem;
+  font-weight: 300;
+  font-family: var(--font-ui);
+  color: var(--ink-faint);
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sp-toggle-btn.active {
+  color: var(--ink);
+  font-weight: 400;
+}
+
+/* ─── 动作按钮 ─── */
+.sp-action-btn {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  background: none;
+  border: 1px solid var(--rule);
+  padding: 4px 12px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  letter-spacing: 0.04em;
+  transition: color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sp-action-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+}
+
+/* ─── 输入框（AI 配置）─── */
+.sp-input {
+  font-size: 0.78rem;
+  font-weight: 300;
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  outline: none;
+  padding: 4px 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 180px;
+  letter-spacing: 0.02em;
+  transition: border-color 0.2s;
+}
+
+.sp-input:focus {
+  border-bottom-color: var(--ink);
+}
+
+.sp-input::placeholder {
+  color: var(--ink-ghost);
+  font-size: 0.68rem;
+}
+
+/* AI 配置 textarea */
+.sp-textarea {
+  font-size: 0.78rem;
+  font-weight: 300;
+  font-family: var(--font-body);
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  outline: none;
+  padding: 4px 0;
+  width: 100%;
+  resize: none;
+  line-height: 1.7;
+  letter-spacing: 0.02em;
+}
+
+.sp-textarea::placeholder {
+  color: var(--ink-ghost);
+  font-size: 0.68rem;
+}
+
+/* AI 配置行 - textarea 独占一行 */
+.sp-row.sp-full {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* ─── 旧 overlay 相关（保留但不再使用）─── */
+#settings-overlay {
+  display: none !important;
+}
+
+/* ─── AI 应用按钮 ─── */
+.sp-apply-btn {
+  border-color: var(--ink-mid);
+  color: var(--ink);
+  font-weight: 400;
+}
+
+/* ─── 人设库 ─── */
+.sp-persona-item {
+  border-bottom: 1px solid var(--rule);
+  padding: 12px 20px;
+}
+
+.sp-persona-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.sp-persona-active-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-ghost);
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.sp-persona-item.active .sp-persona-active-dot {
+  background: var(--ink);
+}
+
+.sp-persona-name-input {
+  flex: 1;
+  font-size: 0.83rem;
+  font-weight: 300;
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  outline: none;
+  padding: 2px 0;
+  letter-spacing: 0.02em;
+  transition: border-color 0.2s;
+  cursor: pointer;
+}
+
+.sp-persona-name-input:focus {
+  border-bottom-color: var(--rule);
+  cursor: text;
+}
+
+.sp-persona-item.active .sp-persona-name-input {
+  font-weight: 400;
+}
+
+.sp-persona-activate {
+  font-size: 0.68rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.sp-persona-item.active .sp-persona-activate {
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+.sp-persona-delete {
+  font-size: 0.68rem;
+  color: var(--ink-ghost);
+  cursor: pointer;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+.sp-persona-content-input {
+  width: 100%;
+  font-size: 0.75rem;
+  font-weight: 200;
+  font-family: var(--font-body);
+  color: var(--ink-mid);
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--rule);
+  outline: none;
+  padding: 8px 0 4px;
+  resize: none;
+  line-height: 1.65;
+  letter-spacing: 0.02em;
+}
+
+.sp-persona-content-input::placeholder {
+  color: var(--ink-ghost);
+}
+
+.sp-persona-add {
+  font-size: 0.75rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  padding: 14px 20px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  border-top: 1px solid var(--rule);
+  transition: color 0.2s;
+}
+
+.sp-persona-add:hover {
+  color: var(--ink);
+}
+
+/* ─── 配色 chip 行 ─── */
+.sp-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 20px 16px;
+}
+
+/* ═══ 字体系统（三槽 + 方案管理 + 字体库）═══ */
+
+/* 已保存方案横排 */
+.font-scheme-row {
+  display: flex;
+  gap: 10px;
+  padding: 4px 20px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-height: 36px;
+}
+.font-scheme-row::-webkit-scrollbar { display: none; }
+
+.font-scheme-chip {
+  font-size: 0.68rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  padding: 5px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  cursor: pointer;
+  background: transparent;
+  font-family: var(--font-ui);
+  transition: all 0.18s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  position: relative;
+}
+.font-scheme-chip.active {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.font-scheme-chip .fsc-del {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  color: var(--bg);
+  font-size: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+}
+.font-scheme-chip:hover .fsc-del { opacity: 1; }
+
+/* 三槽卡片 */
+.font-slots-card {
+  margin: 0 20px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 16px;
+}
+.font-slot-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.font-slot-label {
+  font-size: 0.62rem;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  min-width: 28px;
+}
+.font-select {
+  flex: 1;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  font-weight: 300;
+  color: var(--ink);
+  padding: 4px 0 5px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23b8b5ae' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  padding-right: 18px;
+}
+.font-select:focus { border-bottom-color: var(--ink); }
+
+/* 操作行 */
+.font-action-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+}
+.font-action-btn {
+  font-size: 0.7rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  padding: 5px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  cursor: pointer;
+  background: transparent;
+  font-family: var(--font-ui);
+  transition: all 0.18s;
+}
+.font-action-btn:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* 字体库弹层 */
+#font-lib-overlay { display: none; }
+#font-lib-overlay.open { display: flex !important; }
+.font-lib-popup {
+  background: var(--bg);
+  border-radius: 20px 20px 0 0;
+  padding: 24px 24px 32px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.font-lib-title {
+  font-family: var(--font-title);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  margin-bottom: 16px;
+}
+.font-lib-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 16px;
+}
+.font-lib-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.font-lib-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.font-lib-item-name {
+  font-size: 0.82rem;
+  font-weight: 300;
+  color: var(--ink);
+}
+.font-lib-item-url {
+  font-size: 0.62rem;
+  font-weight: 200;
+  color: var(--ink-ghost);
+  font-family: monospace;
+}
+.font-lib-item-del {
+  font-size: 0.68rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  cursor: pointer;
+  background: transparent;
+  font-family: var(--font-ui);
+  transition: all 0.18s;
+  flex-shrink: 0;
+}
+.font-lib-item-del:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.font-lib-close {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border: none;
+  border-top: 1px solid var(--rule);
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+/* 添加外链 */
+.font-custom-section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.font-custom-label {
+  font-size: 0.6rem;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.font-url-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: transparent;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink);
+  padding: 8px 10px;
+  resize: none;
+  line-height: 1.6;
+  transition: border-color 0.2s;
+}
+.font-url-input:focus { border-color: var(--ink); }
+.font-url-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.font-name-input {
+  width: 80px;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink);
+  padding: 4px 0 5px;
+  transition: border-color 0.2s;
+  flex-shrink: 0;
+}
+.font-name-input:focus { border-bottom-color: var(--ink); }
+.font-url-add-btn {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  padding: 4px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  cursor: pointer;
+  background: transparent;
+  font-family: var(--font-ui);
+  transition: all 0.18s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.font-url-add-btn:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.font-custom-hint {
+  font-size: 0.6rem;
+  font-weight: 200;
+  color: var(--ink-ghost);
+  margin-top: 6px;
+  line-height: 1.6;
+}
+
+/* 字体方案命名弹窗 */
+#font-scheme-name-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 800;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#font-scheme-name-overlay.open { display: flex; }
+.font-scheme-name-popup {
+  background: var(--bg);
+  border-radius: 14px;
+  padding: 24px;
+  width: 280px;
+  max-width: 90vw;
+}
+.font-scheme-name-title {
+  font-family: var(--font-title);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 14px;
+  letter-spacing: 0.04em;
+}
+.font-scheme-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  font-weight: 300;
+  color: var(--ink);
+  padding: 6px 0;
+  margin-bottom: 18px;
+  transition: border-color 0.2s;
+}
+.font-scheme-name-input:focus { border-bottom-color: var(--ink); }
+.font-scheme-name-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.font-scheme-name-btns button {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  padding: 5px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  cursor: pointer;
+  background: transparent;
+  font-family: var(--font-ui);
+  transition: all 0.18s;
+}
+.font-scheme-name-btns button:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* 配色色板预设 */
+.sp-swatch-presets {
+  display: flex;
+  gap: 10px;
+  padding: 12px 20px 8px;
+  flex-wrap: wrap;
+}
+
+.sp-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid var(--rule);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.sp-swatch:hover {
+  transform: scale(1.15);
+  border-color: var(--ink-mid);
+}
+
+/* 已保存配色 chip */
+.sp-color-chip {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid var(--rule);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transition: transform 0.15s;
+}
+
+.sp-color-chip.active {
+  border-color: var(--ink);
+  transform: scale(1.1);
+}
+
+.sp-color-chip .chip-del {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 50%;
+  font-size: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.sp-color-chip:hover .chip-del {
+  opacity: 1;
+}
