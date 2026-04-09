@@ -9,9 +9,16 @@ const Reader = {
   selectedRange: null,
   // 分页模式状态
   _paginationMode: false, // true=分页, false=滚动
+  _dualPage: false,       // 单页/双页模式
   _currentPage: 0,
   _totalPages: 1,
   _pageWidth: 0,
+  // PDF canvas 模式状态
+  _isPdf: false,
+  _pdfCurrentPage: 0,
+  _pdfTotalPages: 0,
+  _pdfPageTextCache: '',
+  _pdfDarkMode: 'auto', // 'light' | 'dark' | 'auto'
 
   // ─── 打开阅读器 ───
   async open(bookId) {
@@ -19,6 +26,7 @@ const Reader = {
     if (!book) return;
 
     this.currentBook = book;
+    this._isPdf = (book.format === 'pdf' || book.type === 'pdf');
     
     // 恢复排版设置
     this.restoreTypography();
@@ -26,7 +34,38 @@ const Reader = {
     // 显示阅读器
     document.getElementById('reader-overlay').classList.add('active');
     document.getElementById('reader-title').textContent = book.title;
+
+    // ─── PDF canvas 模式 ───
+    if (this._isPdf && book.pdfPages && book.pdfPages.length > 0) {
+      this.renderPdfContent(book.pdfPages);
+      // PDF 使用自带的分页，恢复页码
+      this._pdfCurrentPage = book.currentPage || 0;
+      this._pdfTotalPages = book.pdfPages.length;
+      // 应用 PDF 反色设置
+      this._applyPdfDarkMode();
+      // 监听主题变化以同步"自动"模式
+      this._themeObserver = new MutationObserver(() => {
+        if (this._pdfDarkMode === 'auto') this._applyPdfDarkMode();
+      });
+      this._themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+      // 显示页码指示器
+      const indicator = document.getElementById('page-indicator');
+      if (indicator) indicator.classList.add('active');
+      // 判断是否使用分页模式
+      if (this._paginationMode) {
+        this._togglePdfPagination(true);
+      } else {
+        this._showPdfPage(this._pdfCurrentPage);
+        this._setupPdfScrollNav();
+      }
+      this._updatePdfPageIndicator();
+      // 绑定键盘和滑动翻页
+      this._setupKeyboardNav();
+      this._setupSwipeGesture();
+      return;
+    }
     
+    // ─── EPUB / TXT 文本模式 ───
     // 渲染内容（优先使用 htmlContent 富文本）
     this.renderContent(book.content, book.htmlContent);
     
@@ -54,7 +93,10 @@ const Reader = {
   close() {
     // 保存阅读位置
     if (this.currentBook) {
-      if (this._paginationMode) {
+      if (this._isPdf) {
+        // PDF 模式：保存当前页码
+        this.currentBook.currentPage = this._pdfCurrentPage || 0;
+      } else if (this._paginationMode) {
         this.currentBook.currentPage = this._currentPage;
       } else {
         this.currentBook.scrollPosition = document.getElementById('reader-content').scrollTop;
@@ -62,8 +104,25 @@ const Reader = {
       Store.put('books', this.currentBook);
     }
 
-    // 清理分页模式
-    if (this._paginationMode) {
+    // 清理 PDF 模式
+    if (this._isPdf) {
+      this._removePdfScrollNav();
+      this._removeKeyboardNav();
+      this._removeSwipeGesture();
+      this._removeTapZones();
+      if (this._themeObserver) {
+        this._themeObserver.disconnect();
+        this._themeObserver = null;
+      }
+      const indicator = document.getElementById('page-indicator');
+      if (indicator) indicator.classList.remove('active');
+      const container = document.getElementById('reader-content');
+      container.classList.remove('pdf-content', 'pdf-inverted', 'pdf-paginated', 'pdf-dual-page');
+      container.innerHTML = '';
+    }
+
+    // 清理分页模式（epub/txt）
+    if (!this._isPdf && this._paginationMode) {
       this._removeTapZones();
       this._removeSwipeGesture();
       this._removeKeyboardNav();
@@ -95,10 +154,13 @@ const Reader = {
     
     this.currentBook = null;
     this.currentNoteId = null;
+    this._isPdf = false;
   },
 
   // ─── 更新进度条 ───
   updateProgress() {
+    // PDF 模式由 _updatePdfProgress 独立管理
+    if (this._isPdf) return;
     let progress = 0;
     if (this._paginationMode) {
       progress = this._totalPages > 1 ? this._currentPage / (this._totalPages - 1) : 0;
@@ -147,6 +209,173 @@ const Reader = {
     }).join('');
     
     container.innerHTML = html;
+  },
+
+  // ─── 渲染 PDF（canvas 分页模式） ───
+  renderPdfContent(pdfPages) {
+    const container = document.getElementById('reader-content');
+    container.classList.remove('epub-content', 'txt-content');
+    container.classList.add('pdf-content');
+
+    // 生成所有页面的 <img>，每页一张
+    container.innerHTML = pdfPages.map((dataUrl, i) =>
+      `<div class="pdf-page" data-page="${i}">` +
+        `<img src="${dataUrl}" alt="第 ${i + 1} 页" draggable="false">` +
+      `</div>`
+    ).join('');
+  },
+
+  // ─── PDF：显示指定页（滚动到对应位置 或 分页模式切换） ───
+  _showPdfPage(pageIndex) {
+    const container = document.getElementById('reader-content');
+    const pages = container.querySelectorAll('.pdf-page');
+    if (!pages[pageIndex]) return;
+
+    if (this._paginationMode) {
+      if (this._dualPage) {
+        // 双页模式：对齐到偶数索引，同时显示两页
+        if (pageIndex % 2 !== 0) pageIndex = Math.max(0, pageIndex - 1);
+        pages.forEach((p, i) => {
+          p.style.display = (i === pageIndex || i === pageIndex + 1) ? '' : 'none';
+        });
+      } else {
+        // 单页模式：隐藏所有页，只显示目标页
+        pages.forEach((p, i) => {
+          p.style.display = i === pageIndex ? '' : 'none';
+        });
+      }
+    } else {
+      // 滚动模式：滚到目标页
+      pages[pageIndex].scrollIntoView({ behavior: 'auto', block: 'start' });
+    }
+    this._pdfCurrentPage = pageIndex;
+    this._updatePdfPageIndicator();
+    this._updatePdfProgress();
+  },
+
+  // ─── PDF：更新页码指示器 ───
+  _updatePdfPageIndicator() {
+    const numEl = document.getElementById('page-num');
+    if (numEl) {
+      if (this._dualPage && this._paginationMode) {
+        const left = this._pdfCurrentPage + 1;
+        const right = Math.min(this._pdfCurrentPage + 2, this._pdfTotalPages);
+        numEl.textContent = left === right
+          ? `${left} / ${this._pdfTotalPages}`
+          : `${left}-${right} / ${this._pdfTotalPages}`;
+      } else {
+        numEl.textContent = `${this._pdfCurrentPage + 1} / ${this._pdfTotalPages}`;
+      }
+    }
+    const prevBtn = document.getElementById('page-prev');
+    const nextBtn = document.getElementById('page-next');
+    if (prevBtn) prevBtn.disabled = this._pdfCurrentPage <= 0;
+    const step = (this._dualPage && this._paginationMode) ? 2 : 1;
+    if (nextBtn) nextBtn.disabled = this._pdfCurrentPage + step >= this._pdfTotalPages;
+  },
+
+  // ─── PDF：更新进度条 ───
+  _updatePdfProgress() {
+    const progress = this._pdfTotalPages > 1
+      ? this._pdfCurrentPage / (this._pdfTotalPages - 1)
+      : 0;
+    document.getElementById('reader-progress-bar').style.width = (progress * 100) + '%';
+  },
+
+  // ─── PDF：滚动监听（自动检测当前可见页） ───
+  _setupPdfScrollNav() {
+    const container = document.getElementById('reader-content');
+    this._pdfScrollHandler = () => {
+      const pages = container.querySelectorAll('.pdf-page');
+      if (!pages.length) return;
+
+      const containerTop = container.scrollTop;
+      const containerMid = containerTop + container.clientHeight / 3;
+
+      let closestPage = 0;
+      for (let i = 0; i < pages.length; i++) {
+        if (pages[i].offsetTop <= containerMid) {
+          closestPage = i;
+        } else {
+          break;
+        }
+      }
+
+      if (closestPage !== this._pdfCurrentPage) {
+        this._pdfCurrentPage = closestPage;
+        this._updatePdfPageIndicator();
+        this._updatePdfProgress();
+      }
+    };
+    container.addEventListener('scroll', this._pdfScrollHandler, { passive: true });
+  },
+
+  // ─── PDF：清理滚动监听 ───
+  _removePdfScrollNav() {
+    if (this._pdfScrollHandler) {
+      const container = document.getElementById('reader-content');
+      container.removeEventListener('scroll', this._pdfScrollHandler);
+      this._pdfScrollHandler = null;
+    }
+  },
+
+  // ─── PDF：反色显示控制 ───
+  setPdfDarkMode(mode) {
+    this._pdfDarkMode = mode; // 'light' | 'dark' | 'auto'
+    // 持久化
+    const saved = JSON.parse(localStorage.getItem('read-layout') || '{}');
+    saved.pdfDarkMode = mode;
+    localStorage.setItem('read-layout', JSON.stringify(saved));
+    // 应用
+    this._applyPdfDarkMode();
+    // 同步按钮
+    document.querySelectorAll('.typo-btn[data-param="pdfDark"]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.value === mode);
+    });
+  },
+
+  _applyPdfDarkMode() {
+    const container = document.getElementById('reader-content');
+    if (!container) return;
+    let shouldInvert = false;
+    if (this._pdfDarkMode === 'dark') {
+      shouldInvert = true;
+    } else if (this._pdfDarkMode === 'auto') {
+      // 跟随应用主题
+      shouldInvert = document.documentElement.getAttribute('data-theme') === 'dark';
+    }
+    // else 'light' → 不反色
+    container.classList.toggle('pdf-inverted', shouldInvert);
+  },
+
+  // ─── PDF：切换分页/滚动显示 ───
+  _togglePdfPagination(paginated) {
+    const container = document.getElementById('reader-content');
+    if (paginated) {
+      container.classList.add('pdf-paginated');
+      // 恢复双页 CSS 类（如果之前已开启）
+      container.classList.toggle('pdf-dual-page', this._dualPage);
+      // 移除滚动监听（分页模式不需要）
+      this._removePdfScrollNav();
+      // 绑定翻页触摸区
+      this._setupTapZones();
+      // 通过 _showPdfPage 应用单/双页显示逻辑
+      this._showPdfPage(this._pdfCurrentPage);
+    } else {
+      container.classList.remove('pdf-paginated', 'pdf-dual-page');
+      // 显示所有页
+      container.querySelectorAll('.pdf-page').forEach(p => {
+        p.style.display = '';
+      });
+      // 移除翻页触摸区
+      this._removeTapZones();
+      // 重新绑定滚动监听
+      this._setupPdfScrollNav();
+      // 滚动到当前页
+      this._showPdfPage(this._pdfCurrentPage);
+    }
+    this._updatePdfPageIndicator();
+    this._updatePdfProgress();
   },
 
   // ─── 恢复高亮 ───
@@ -268,7 +497,10 @@ const Reader = {
     if (entry && entry.el) {
       if (this._paginationMode) {
         // 分页模式：计算元素所在页码
-        const elLeft = entry.el.offsetLeft;
+        // offsetLeft 相对于 offsetParent（#reader-content），需减去容器 padding
+        const container = document.getElementById('reader-content');
+        const padL = parseFloat(getComputedStyle(container).paddingLeft) || 0;
+        const elLeft = entry.el.offsetLeft - padL;
         const page = Math.floor(elLeft / this._pageWidth);
         this.goToPage(page);
       } else {
@@ -432,6 +664,9 @@ const Reader = {
 
   // ─── 处理文本选择 ───
   handleSelection() {
+    // PDF canvas 模式下不支持选词
+    if (this._isPdf) return;
+
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) {
       document.getElementById('selection-dock').classList.remove('active');
@@ -584,6 +819,10 @@ const Reader = {
     this.renderMessages(note.messages);
 
     // 构建上下文（含书籍记忆注入）
+    // PDF 模式：先异步提取当前页文字
+    if (this._isPdf) {
+      await this.getPdfCurrentPageText();
+    }
     const bookContext = this.currentBook?.context || '';
     const readingContext = this.getReadingContext(note.quote);
     const memories = this.currentBook?.memories || [];
@@ -666,6 +905,11 @@ const Reader = {
 
   // ─── 获取阅读上下文（前后各 500 字） ───
   getReadingContext(quote) {
+    // PDF 模式：按需提取当前页文字（异步，但此处返回同步缓存值）
+    if (this._isPdf) {
+      return this._pdfPageTextCache || '（PDF 当前页文字提取中…）';
+    }
+
     const content = this.currentBook?.content;
     if (!content || !quote) return '';
     
@@ -676,6 +920,20 @@ const Reader = {
     const end = Math.min(content.length, index + quote.length + 500);
     
     return content.substring(start, end);
+  },
+
+  // ─── PDF：提取当前页文字供 AI 使用 ───
+  async getPdfCurrentPageText() {
+    if (!this.currentBook?.pdfData) return '';
+    const pageNum = (this._pdfCurrentPage || 0) + 1; // pdfjs 页码从 1 开始
+    try {
+      const text = await Parser.extractPdfText(this.currentBook.pdfData, pageNum);
+      this._pdfPageTextCache = text;
+      return text;
+    } catch (e) {
+      console.warn('PDF 当前页文字提取失败:', e);
+      return '';
+    }
   },
 
   // ─── 复制消息 ───
@@ -711,6 +969,40 @@ const Reader = {
 
   // ─── 排版快捷面板 ───
   showTypography() {
+    // PDF 模式下排版面板仅显示阅读配色，隐藏文字排版选项
+    const isPdf = this._isPdf;
+    document.querySelectorAll('#typography-scroll .typo-group').forEach(group => {
+      // 阅读模式、版式 按钮组也不适用于 PDF
+      const btns = group.querySelectorAll('.typo-btn[data-param]');
+      if (btns.length > 0) {
+        const param = btns[0].dataset.param;
+        // 字号、行高、间距、版式 —— PDF 下隐藏（保留「模式」供 PDF 滚动/分页切换）
+        if (['size', 'line', 'padding', 'columns'].includes(param)) {
+          group.style.display = isPdf ? 'none' : '';
+        }
+      }
+    });
+    // 滑块行也隐藏
+    document.querySelectorAll('#typography-scroll .typo-slider-row').forEach(row => {
+      row.style.display = isPdf ? 'none' : '';
+    });
+    // 字体 chip 区也隐藏
+    const fontLabel = document.querySelector('#typography-scroll .typo-section-label');
+    const fontChips = document.getElementById('typo-font-chips');
+    if (fontLabel) fontLabel.style.display = isPdf ? 'none' : '';
+    if (fontChips) fontChips.style.display = isPdf ? 'none' : '';
+
+    // PDF 显示模式控制（明亮/暗色/自动）
+    const pdfDarkGroup = document.getElementById('typo-pdf-dark');
+    if (pdfDarkGroup) {
+      pdfDarkGroup.style.display = isPdf ? '' : 'none';
+      if (isPdf) {
+        document.querySelectorAll('.typo-btn[data-param="pdfDark"]').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.value === this._pdfDarkMode);
+        });
+      }
+    }
+
     // 同步当前 CSS 变量值到按钮和滑块
     const root = document.documentElement;
     const curSize = getComputedStyle(root).getPropertyValue('--read-size').trim() || '19px';
@@ -744,7 +1036,7 @@ const Reader = {
       btn.classList.toggle('active', (btn.dataset.value === 'dual') === this._dualPage);
     });
 
-    // 控制「版式」行的可见性（仅分页模式下显示）
+    // 控制「版式」行的可见性（分页模式下显示，含 PDF 分页）
     const colGroup = document.getElementById('typo-columns-group');
     if (colGroup) colGroup.style.display = this._paginationMode ? '' : 'none';
 
@@ -803,6 +1095,12 @@ const Reader = {
     // 同步设置页 UI（若已渲染）
     if (typeof Settings !== 'undefined') Settings.renderFontSettings();
     App.showToast(`阅读字体已设为「${f.label}」`);
+
+    // 字体变更会影响文字宽度，分页模式下需重算分页
+    if (this._paginationMode) {
+      clearTimeout(this._typoRecalcTimer);
+      this._typoRecalcTimer = setTimeout(() => this.recalcPages(), 200);
+    }
   },
 
   // 渲染「字」面板中的配色 chip（内置 + 用户自定义）
@@ -866,6 +1164,12 @@ const Reader = {
     const saved = JSON.parse(localStorage.getItem('read-layout') || '{}');
     saved[param] = value;
     localStorage.setItem('read-layout', JSON.stringify(saved));
+
+    // 分页模式下，字号/行高/页边距变更会影响多栏排版，需重算分页
+    if (this._paginationMode) {
+      clearTimeout(this._typoRecalcTimer);
+      this._typoRecalcTimer = setTimeout(() => this.recalcPages(), 120);
+    }
   },
 
   // 同步按钮激活状态
@@ -891,15 +1195,13 @@ const Reader = {
     // 恢复阅读模式
     this._paginationMode = saved.paginationMode || false;
     this._dualPage = saved.dualPage || false;
+    // 恢复 PDF 反色模式
+    this._pdfDarkMode = saved.pdfDarkMode || 'auto';
   },
 
   // ═══ 分页引擎 ═══
-
-  _dualPage: false,       // 单页/双页模式
-  _paginationMode: false, // 是否分页模式
-  _currentPage: 0,
-  _totalPages: 1,
-  _pageWidth: 0,          // 每次翻页的 translateX 步长
+  // 注：_paginationMode, _currentPage, _totalPages, _pageWidth, _dualPage
+  // 已在对象顶部声明初始值，此处不再重复声明。
 
   // 切换分页/滚动模式
   togglePaginationMode(mode) {
@@ -908,7 +1210,10 @@ const Reader = {
     saved.paginationMode = mode;
     localStorage.setItem('read-layout', JSON.stringify(saved));
 
-    if (mode) {
+    // PDF 模式走专用分页切换
+    if (this._isPdf) {
+      this._togglePdfPagination(mode);
+    } else if (mode) {
       this.enablePagination();
     } else {
       this.disablePagination();
@@ -917,7 +1222,7 @@ const Reader = {
     document.querySelectorAll('.typo-btn[data-param="mode"]').forEach(btn => {
       btn.classList.toggle('active', (btn.dataset.value === 'paginated') === mode);
     });
-    // 显示/隐藏版式选项
+    // 显示/隐藏版式选项（分页模式下显示，含 PDF）
     const colGroup = document.getElementById('typo-columns-group');
     if (colGroup) colGroup.style.display = mode ? '' : 'none';
   },
@@ -930,17 +1235,25 @@ const Reader = {
     localStorage.setItem('read-layout', JSON.stringify(saved));
 
     const container = document.getElementById('reader-content');
-    container.classList.toggle('dual-page', dual);
+
+    if (this._isPdf) {
+      // PDF 双页模式：添加/移除 CSS 类，刷新当前显示
+      container.classList.toggle('pdf-dual-page', dual);
+      if (this._paginationMode) {
+        this._showPdfPage(this._pdfCurrentPage);
+      }
+    } else {
+      container.classList.toggle('dual-page', dual);
+      // EPUB/TXT 分页模式下重算
+      if (this._paginationMode) {
+        this.recalcPages();
+      }
+    }
 
     // 同步按钮状态
     document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
       btn.classList.toggle('active', (btn.dataset.value === 'dual') === dual);
     });
-
-    // 如果当前是分页模式，重算
-    if (this._paginationMode) {
-      this.recalcPages();
-    }
   },
 
   // 启用分页模式
@@ -1018,7 +1331,10 @@ const Reader = {
     const wrapper = container.querySelector('.page-columns');
     if (!wrapper) return;
 
-    // 获取 padding 值
+    // 重算时临时禁用翻页动画，避免滑块拖动时抖动
+    wrapper.style.transition = 'none';
+
+    // 获取 padding 值（只读取，不修改）
     const cs = getComputedStyle(container);
     const padL = parseFloat(cs.paddingLeft) || 0;
     const padR = parseFloat(cs.paddingRight) || 0;
@@ -1026,25 +1342,32 @@ const Reader = {
     const padB = parseFloat(cs.paddingBottom) || 0;
 
     // 内容区可用尺寸（扣除 padding）
-    const contentW = container.clientWidth - padL - padR;
-    const contentH = container.clientHeight - padT - padB - 44; // 44px 为底部页码栏高度
+    let contentW = container.clientWidth - padL - padR;
+    // 动态获取底部页码指示栏实际高度（含 safe-area-inset-bottom）
+    const indicator = document.getElementById('page-indicator');
+    const indicatorH = indicator ? indicator.offsetHeight : 40;
+    let contentH = container.clientHeight - padT - padB - indicatorH;
+
+    // 兜底保护：确保有效数值（不修改 DOM padding，仅限制计算值）
+    contentW = Math.max(contentW, 200);
+    contentH = Math.max(contentH, 120);
+
+    // 列间距 = padL + padR（将下一列推出 padding-box 裁切区）
+    const pageGap = padL + padR;
 
     if (this._dualPage) {
-      // 双页：2 列可见，每列 = (contentW - gap) / 2
-      const gap = 32;
-      const colW = Math.floor((contentW - gap) / 2);
+      // 双页：2 列可见
+      const colW = Math.floor((contentW - pageGap) / 2);
       wrapper.style.columnCount = '2';
-      wrapper.style.columnWidth = colW + 'px';
-      wrapper.style.columnGap = gap + 'px';
-      // 翻页步长：跳过 2 列 = 2 * (colW + gap)
-      this._pageWidth = 2 * (colW + gap);
+      wrapper.style.columnWidth = Math.max(colW, 100) + 'px';
+      wrapper.style.columnGap = pageGap + 'px';
+      this._pageWidth = 2 * (Math.max(colW, 100) + pageGap);
     } else {
-      // 单页：1 列 = 整个 contentW，无间距
+      // 单页：1 列 = contentW
       wrapper.style.columnCount = '1';
       wrapper.style.columnWidth = Math.round(contentW) + 'px';
-      wrapper.style.columnGap = '0px';
-      // 翻页步长 = contentW
-      this._pageWidth = Math.round(contentW);
+      wrapper.style.columnGap = pageGap + 'px';
+      this._pageWidth = Math.round(contentW + pageGap);
     }
 
     wrapper.style.height = contentH + 'px';
@@ -1058,7 +1381,13 @@ const Reader = {
         if (this._currentPage >= this._totalPages) {
           this._currentPage = this._totalPages - 1;
         }
+
+        // 无动画跳到当前页，再恢复 transition
         this.goToPage(this._currentPage);
+        // 下一帧恢复动画，以便用户手动翻页时有过渡效果
+        requestAnimationFrame(() => {
+          wrapper.style.transition = '';
+        });
       });
     });
   },
@@ -1079,6 +1408,13 @@ const Reader = {
 
   // 上一页
   prevPage() {
+    if (this._isPdf) {
+      const step = (this._dualPage && this._paginationMode) ? 2 : 1;
+      const target = this._pdfCurrentPage - step;
+      if (target >= 0) this._showPdfPage(target);
+      else if (this._pdfCurrentPage > 0) this._showPdfPage(0);
+      return;
+    }
     if (this._currentPage > 0) {
       this.goToPage(this._currentPage - 1);
     }
@@ -1086,6 +1422,12 @@ const Reader = {
 
   // 下一页
   nextPage() {
+    if (this._isPdf) {
+      const step = (this._dualPage && this._paginationMode) ? 2 : 1;
+      const target = this._pdfCurrentPage + step;
+      if (target < this._pdfTotalPages) this._showPdfPage(target);
+      return;
+    }
     if (this._currentPage < this._totalPages - 1) {
       this.goToPage(this._currentPage + 1);
     }
@@ -1166,7 +1508,7 @@ const Reader = {
   _setupKeyboardNav() {
     this._removeKeyboardNav();
     this._keyHandler = (e) => {
-      if (!this._paginationMode) return;
+      if (!this._paginationMode && !this._isPdf) return;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
         e.preventDefault();
         this.prevPage();

@@ -330,6 +330,16 @@
                 </div>
             </div>
 
+            <!-- PDF 明暗模式（仅 PDF 时可见） -->
+            <div class="typo-group" id="typo-pdf-dark" style="margin-top:10px;display:none;">
+                <div class="typo-label">明暗</div>
+                <div class="typo-options">
+                    <button class="typo-btn" data-param="pdfDark" data-value="light" onclick="Reader.setPdfDarkMode('light')">明亮</button>
+                    <button class="typo-btn" data-param="pdfDark" data-value="dark" onclick="Reader.setPdfDarkMode('dark')">暗色</button>
+                    <button class="typo-btn active" data-param="pdfDark" data-value="auto" onclick="Reader.setPdfDarkMode('auto')">自动</button>
+                </div>
+            </div>
+
             <!-- 阅读字体 -->
             <div class="typo-section-label">阅读字体</div>
             <div id="typo-font-chips" class="typo-chip-row">

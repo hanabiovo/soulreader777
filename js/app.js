@@ -237,14 +237,29 @@ const App = {
   // 导入文件
   async importFile(file) {
     try {
-      this.showToast('正在解析...');
-      
-      const bookData = await Parser.parse(file);
+      const ext = file.name.split('.').pop().toLowerCase();
+      const isPdf = ext === 'pdf';
+
+      if (isPdf) {
+        this.showToast('PDF 渲染中，请稍候…');
+      } else {
+        this.showToast('正在解析...');
+      }
+
+      // PDF 传入进度回调
+      const onProgress = isPdf ? (cur, total) => {
+        this.showToast(`PDF 渲染中 ${cur}/${total} 页…`);
+      } : undefined;
+
+      const bookData = isPdf
+        ? await Parser.parsePDF(file, onProgress)
+        : await Parser.parse(file);
       
       const book = {
         // 注意：不预设 id，让 IndexedDB autoIncrement 生成
         title: bookData.title,
-        content: bookData.content || '',   // 兼容 PDF canvas 模式（无 content）
+        content: bookData.content || '',   // PDF 无 content，epub/txt 正常
+        htmlContent: bookData.htmlContent || '',  // EPUB 富文本
         format: bookData.format,           // 统一使用 format 字段
         type: bookData.format,             // 兼容旧字段名 type
         size: bookData.size,
@@ -252,15 +267,23 @@ const App = {
         createdAt: Date.now(),
         lastOpenedAt: Date.now(),
         scrollPosition: 0,
+        currentPage: 0,                    // PDF 页码记忆
         context: '',
         memories: []
       };
+
+      // PDF 特有字段
+      if (isPdf && bookData.pdfPages) {
+        book.pdfPages = bookData.pdfPages;   // dataURL 数组（canvas 渲染结果）
+        book.pdfData = bookData.pdfData;     // 原始 ArrayBuffer（AI 按需提取文字用）
+      }
       
       await Store.put('books', book);
       
       this.showToast('导入成功');
       await this.loadShelf();
     } catch (error) {
+      this.log('error', 'App', '导入失败: ' + error.message, error);
       this.showToast('导入失败: ' + error.message);
     }
   },

@@ -77,27 +77,51 @@ const Parser = {
     };
   },
 
-  // 解析 PDF
-  async parsePDF(file) {
+  // 解析 PDF —— canvas 分页渲染（保留原始视觉效果）
+  async parsePDF(file, onProgress) {
     const arrayBuffer = await file.arrayBuffer();
+    const pdfDataCopy = arrayBuffer.slice(0); // 克隆一份，pdf.js 会 detach 原始 buffer
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const title = file.name.replace('.pdf', '');
-    const chapters = [];
+    const title = file.name.replace(/\.pdf$/i, '');
+    const pdfPages = [];
 
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const text = textContent.items.map(item => item.str).join(' ');
-      if (text.trim()) chapters.push(text.trim());
+      const viewport = page.getViewport({ scale: 2.0 }); // 2x 防模糊
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({
+        canvasContext: canvas.getContext('2d'),
+        viewport
+      }).promise;
+      pdfPages.push(canvas.toDataURL('image/jpeg', 0.92));
+      if (onProgress) onProgress(i, pdf.numPages);
     }
 
     return {
       title,
-      content: chapters.join('\n\n'),
+      content: '',           // PDF 不提取文字到 content（避免乱序错字）
+      pdfPages,              // dataURL 数组，供阅读界面显示
+      pdfData: pdfDataCopy,  // 克隆的数据，供 AI 按需提取文字（原始 buffer 已被 pdf.js detach）
       format: 'pdf',
       size: file.size,
       chapters: pdf.numPages
     };
+  },
+
+  // AI 用：按需提取指定页纯文字（不在导入时调用）
+  async extractPdfText(pdfData, pageNum) {
+    try {
+      const pdf = await pdfjsLib.getDocument({ data: pdfData.slice(0) }).promise;
+      if (pageNum < 1 || pageNum > pdf.numPages) return '';
+      const page = await pdf.getPage(pageNum);
+      const content = await page.getTextContent();
+      return content.items.map(s => s.str).join(' ');
+    } catch (e) {
+      console.warn('PDF 文字提取失败:', e);
+      return '';
+    }
   },
 
   // 解析 TXT（支持 GBK 编码）

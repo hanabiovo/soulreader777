@@ -774,3 +774,95 @@
   right: 0;
   width: 30%;
 }
+
+/* ═══ PDF Canvas 分页模式 ═══ */
+
+/* PDF 模式下的正文容器：垂直滚动，页面上下排列 */
+#reader-content.pdf-content {
+  padding: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #e8e5de;
+  /* 覆盖文本排版变量，PDF 不需要 */
+  font-size: initial;
+  line-height: initial;
+  letter-spacing: initial;
+}
+
+[data-theme="dark"] #reader-content.pdf-content {
+  background: #1a1918;
+}
+
+/* 每页容器 */
+.pdf-page {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 8px 0;
+}
+
+.pdf-page:first-child {
+  padding-top: 0;
+}
+
+/* 页面图片：自适应宽度，保持原始比例 */
+.pdf-page img {
+  width: 100%;
+  max-width: 800px;
+  height: auto;
+  display: block;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  background: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+[data-theme="dark"] .pdf-page img {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* PDF 反色模式（暗色阅读） */
+#reader-content.pdf-inverted .pdf-page img {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* PDF 分页模式：隐藏滚动，单页居中 */
+#reader-content.pdf-paginated {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#reader-content.pdf-paginated .pdf-page {
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+}
+
+#reader-content.pdf-paginated .pdf-page img {
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* PDF 双页并列模式 */
+#reader-content.pdf-paginated.pdf-dual-page {
+  flex-direction: row;
+  gap: 2px;
+}
+
+#reader-content.pdf-paginated.pdf-dual-page .pdf-page {
+  width: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#reader-content.pdf-paginated.pdf-dual-page .pdf-page img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
