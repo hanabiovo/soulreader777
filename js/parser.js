@@ -3,6 +3,26 @@
    ═══════════════════════════════════════ */
 
 const Parser = {
+  // ─── HTML 安全过滤（白名单标签） ───
+  _allowedTags: new Set([
+    'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'em', 'i', 'strong', 'b', 'blockquote', 'ul', 'ol', 'li',
+    'span', 'div', 'section', 'article', 'aside', 'header',
+    'sup', 'sub', 'small', 'hr'
+  ]),
+
+  sanitizeHTML(bodyEl) {
+    // 移除 script / style / img / svg / link 等不安全/不需要的元素
+    bodyEl.querySelectorAll('script, style, link, img, svg, iframe, object, embed, video, audio, canvas, form, input, button').forEach(el => el.remove());
+    // 移除所有内联 style 和 class 属性（保持纯净语义）
+    bodyEl.querySelectorAll('*').forEach(el => {
+      el.removeAttribute('style');
+      el.removeAttribute('class');
+      el.removeAttribute('id');
+    });
+    return bodyEl.innerHTML.trim();
+  },
+
   // 解析 EPUB
   async parseEPUB(file) {
     const zip = await JSZip.loadAsync(file);
@@ -29,7 +49,8 @@ const Parser = {
     });
 
     const basePath = opfFile.substring(0, opfFile.lastIndexOf('/') + 1);
-    const chapters = [];
+    const textChapters = [];
+    const htmlChapters = [];
     
     for (const href of spine) {
       if (!href) continue;
@@ -39,16 +60,20 @@ const Parser = {
         const html = await chapterFile.async('text');
         const doc = parser.parseFromString(html, 'text/html');
         const text = doc.body.textContent.trim();
-        if (text) chapters.push(text);
+        if (text) {
+          textChapters.push(text);
+          htmlChapters.push(this.sanitizeHTML(doc.body));
+        }
       }
     }
 
     return {
       title,
-      content: chapters.join('\n\n'),
+      content: textChapters.join('\n\n'),
+      htmlContent: htmlChapters.join('<hr class="chapter-break">'),
       format: 'epub',
       size: file.size,
-      chapters: chapters.length
+      chapters: textChapters.length
     };
   },
 

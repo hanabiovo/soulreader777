@@ -120,18 +120,90 @@
   margin-bottom: var(--read-para);
 }
 
+/* TXT 模式：首行缩进 2em */
+#reader-content.txt-content p {
+  text-indent: 2em;
+}
+
+/* 对话段落不缩进（以引号开头） */
+#reader-content.txt-content p.dialogue {
+  text-indent: 0;
+}
+
+/* 章节标题样式增强 */
 #reader-content h1,
 #reader-content h2,
 #reader-content h3 {
   font-family: var(--font-title);
-  margin-top: 1.8em;
+  font-weight: 600;
+  text-indent: 0;
+  break-after: avoid;
+}
+
+#reader-content h1 {
+  font-size: 1.4em;
+  margin-top: 2.5em;
+  margin-bottom: 1em;
+  text-align: center;
+}
+
+#reader-content h2 {
+  font-size: 1.2em;
+  margin-top: 2.2em;
   margin-bottom: 0.8em;
+}
+
+/* TXT 识别出的章节标题：居中、上方加分隔 */
+#reader-content h2.chapter-title {
+  text-align: center;
+  padding-top: 1.5em;
+  border-top: 1px solid var(--rule);
+  margin-top: 2.5em;
+}
+
+#reader-content h3 {
+  font-size: 1.08em;
+  margin-top: 1.8em;
+  margin-bottom: 0.6em;
+}
+
+/* EPUB 章节分隔线 */
+#reader-content hr.chapter-break {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 2.5em 0;
+}
+
+/* 排版避断：标题/段首不出现在页底 */
+#reader-content h1,
+#reader-content h2,
+#reader-content h3 {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+#reader-content p {
+  orphans: 2;
+  widows: 2;
+}
+
+/* EPUB 保留的强调样式 */
+#reader-content em,
+#reader-content i {
+  font-style: italic;
+}
+
+#reader-content strong,
+#reader-content b {
   font-weight: 600;
 }
 
-#reader-content h1 { font-size: 1.3em; }
-#reader-content h2 { font-size: 1.15em; }
-#reader-content h3 { font-size: 1.05em; }
+#reader-content blockquote {
+  margin: 1em 0;
+  padding-left: 1em;
+  border-left: 2px solid var(--rule);
+  color: var(--ink-mid);
+}
 
 /* 选词高亮 - 底线风格 */
 .text-selected {
@@ -606,4 +678,95 @@
 
 .memory-card-del:hover {
   color: var(--ink);
+}
+
+/* ═══════════════════════════════════════
+   分页模式
+   ═══════════════════════════════════════ */
+
+/* 分页容器：外层隐藏溢出，内层多栏 */
+#reader-content.paginated {
+  overflow: hidden;
+  height: 100%;
+  padding-bottom: 48px; /* 为底部页码栏留空间 */
+}
+
+#reader-content.paginated .page-columns {
+  column-width: 100vw;
+  column-gap: 0;
+  column-fill: auto;
+  height: 100%;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+/* 底部页码指示栏 */
+#page-indicator {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  background: var(--bg);
+  border-top: 1px solid var(--rule);
+  z-index: 2050;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+#page-indicator.active {
+  display: flex;
+}
+
+.page-nav-btn {
+  font-size: 0.75rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: var(--font-ui);
+  padding: 4px 8px;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s;
+}
+
+.page-nav-btn:hover {
+  color: var(--ink);
+}
+
+.page-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+#page-num {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-mid);
+  letter-spacing: 0.06em;
+  min-width: 60px;
+  text-align: center;
+}
+
+/* 翻页触摸区域 */
+.page-tap-zone {
+  position: absolute;
+  top: 0;
+  bottom: 40px;
+  z-index: 2040;
+  cursor: pointer;
+}
+
+.page-tap-left {
+  left: 0;
+  width: 35%;
+}
+
+.page-tap-right {
+  right: 0;
+  width: 35%;
 }

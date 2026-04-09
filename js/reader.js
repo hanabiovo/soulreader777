@@ -7,6 +7,11 @@ const Reader = {
   currentNoteId: null,
   selectedText: '',
   selectedRange: null,
+  // 分页模式状态
+  _paginationMode: false, // true=分页, false=滚动
+  _currentPage: 0,
+  _totalPages: 1,
+  _pageWidth: 0,
 
   // ─── 打开阅读器 ───
   async open(bookId) {
@@ -22,15 +27,25 @@ const Reader = {
     document.getElementById('reader-overlay').classList.add('active');
     document.getElementById('reader-title').textContent = book.title;
     
-    // 渲染内容
-    this.renderContent(book.content);
+    // 渲染内容（优先使用 htmlContent 富文本）
+    this.renderContent(book.content, book.htmlContent);
     
-    // 恢复滚动位置
-    setTimeout(() => {
-      const content = document.getElementById('reader-content');
-      content.scrollTop = book.scrollPosition || 0;
-      this.updateProgress();
-    }, 100);
+    // 应用分页模式（如果已开启）
+    if (this._paginationMode) {
+      this.enablePagination();
+      // 恢复页码
+      setTimeout(() => {
+        this._currentPage = book.currentPage || 0;
+        this.goToPage(this._currentPage);
+      }, 150);
+    } else {
+      // 恢复滚动位置
+      setTimeout(() => {
+        const content = document.getElementById('reader-content');
+        content.scrollTop = book.scrollPosition || 0;
+        this.updateProgress();
+      }, 100);
+    }
 
     // 恢复高亮
     await this.restoreHighlights(bookId);
@@ -42,10 +57,25 @@ const Reader = {
 
   // ─── 关闭阅读器 ───
   close() {
-    // 保存滚动位置
+    // 保存阅读位置
     if (this.currentBook) {
-      this.currentBook.scrollPosition = document.getElementById('reader-content').scrollTop;
+      if (this._paginationMode) {
+        this.currentBook.currentPage = this._currentPage;
+      } else {
+        this.currentBook.scrollPosition = document.getElementById('reader-content').scrollTop;
+      }
       Store.put('books', this.currentBook);
+    }
+
+    // 清理分页模式
+    if (this._paginationMode) {
+      this._removeTapZones();
+      this._removeSwipeGesture();
+      this._removeKeyboardNav();
+      const indicator = document.getElementById('page-indicator');
+      if (indicator) indicator.classList.remove('active');
+      const container = document.getElementById('reader-content');
+      container.classList.remove('paginated');
     }
 
     // 移除滚动监听
@@ -67,29 +97,50 @@ const Reader = {
 
   // ─── 更新进度条 ───
   updateProgress() {
-    const content = document.getElementById('reader-content');
-    const scrollable = content.scrollHeight - content.clientHeight;
-    const progress = scrollable > 0 ? content.scrollTop / scrollable : 0;
+    let progress = 0;
+    if (this._paginationMode) {
+      progress = this._totalPages > 1 ? this._currentPage / (this._totalPages - 1) : 0;
+    } else {
+      const content = document.getElementById('reader-content');
+      const scrollable = content.scrollHeight - content.clientHeight;
+      progress = scrollable > 0 ? content.scrollTop / scrollable : 0;
+    }
     document.getElementById('reader-progress-bar').style.width = (progress * 100) + '%';
   },
 
   // ─── 渲染正文 ───
-  renderContent(content) {
+  renderContent(content, htmlContent) {
     const container = document.getElementById('reader-content');
     
     // 兼容 content 为 undefined/null（PDF canvas 模式或数据异常）
-    if (!content) {
+    if (!content && !htmlContent) {
       container.innerHTML = '<p style="color:var(--ink-faint);text-align:center;padding:40px 0;">暂无正文内容</p>';
       return;
     }
 
+    // EPUB 富文本模式：直接注入安全过滤后的 HTML
+    if (htmlContent) {
+      container.innerHTML = htmlContent;
+      container.classList.add('epub-content');
+      container.classList.remove('txt-content');
+      return;
+    }
+
+    // TXT / 纯文本模式
+    container.classList.add('txt-content');
+    container.classList.remove('epub-content');
     const paragraphs = content.split(/\n+/).filter(p => p.trim());
     const html = paragraphs.map(p => {
-      const escaped = this.escapeHtml(p);
+      const trimmed = p.trim();
+      const escaped = this.escapeHtml(trimmed);
       // 识别标题（以 # 开头）
-      if (p.startsWith('### ')) return `<h3>${escaped.slice(4)}</h3>`;
-      if (p.startsWith('## '))  return `<h2>${escaped.slice(3)}</h2>`;
-      if (p.startsWith('# '))   return `<h1>${escaped.slice(2)}</h1>`;
+      if (trimmed.startsWith('### ')) return `<h3>${escaped.slice(4)}</h3>`;
+      if (trimmed.startsWith('## '))  return `<h2>${escaped.slice(3)}</h2>`;
+      if (trimmed.startsWith('# '))   return `<h1>${escaped.slice(2)}</h1>`;
+      // 识别中文章节标题（复用 _tocPatterns）
+      if (this._tocPatterns.some(re => re.test(trimmed))) {
+        return `<h2 class="chapter-title">${escaped}</h2>`;
+      }
       return `<p>${escaped}</p>`;
     }).join('');
     
@@ -213,7 +264,14 @@ const Reader = {
   scrollToTocEntry(index) {
     const entry = this._tocEntries && this._tocEntries[index];
     if (entry && entry.el) {
-      entry.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (this._paginationMode) {
+        // 分页模式：计算元素所在页码
+        const elLeft = entry.el.offsetLeft;
+        const page = Math.floor(elLeft / this._pageWidth);
+        this.goToPage(page);
+      } else {
+        entry.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     }
     document.getElementById('toc-panel').classList.remove('active');
   },
@@ -674,6 +732,11 @@ const Reader = {
     if (padSlider) padSlider.value = parseFloat(curPx);
     this.syncSliderLabel('padding-val', curPx);
 
+    // 同步阅读模式按钮
+    document.querySelectorAll('.typo-btn[data-param="mode"]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.value === 'paginated') === this._paginationMode);
+    });
+
     // 渲染字体/配色 chip
     this.renderTypoFontChips();
     this.renderTypoColorChips();
@@ -814,6 +877,233 @@ const Reader = {
       if (saved.readBg)  rc.style.setProperty('--read-bg',  saved.readBg);
       if (saved.readInk) rc.style.setProperty('--read-ink', saved.readInk);
     }
+    // 恢复阅读模式
+    this._paginationMode = saved.paginationMode || false;
+  },
+
+  // ═══ 分页引擎 ═══
+
+  // 切换分页/滚动模式
+  togglePaginationMode(mode) {
+    this._paginationMode = mode;
+    const saved = JSON.parse(localStorage.getItem('read-layout') || '{}');
+    saved.paginationMode = mode;
+    localStorage.setItem('read-layout', JSON.stringify(saved));
+
+    if (mode) {
+      this.enablePagination();
+    } else {
+      this.disablePagination();
+    }
+    // 同步按钮状态
+    document.querySelectorAll('.typo-btn[data-param="mode"]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.value === 'paginated') === mode);
+    });
+  },
+
+  // 启用分页模式
+  enablePagination() {
+    const container = document.getElementById('reader-content');
+    container.classList.add('paginated');
+
+    // 将现有内容包裹在 page-columns 容器中
+    if (!container.querySelector('.page-columns')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'page-columns';
+      while (container.firstChild) {
+        wrapper.appendChild(container.firstChild);
+      }
+      container.appendChild(wrapper);
+    }
+
+    // 移除滚动监听
+    if (this._scrollHandler) {
+      container.removeEventListener('scroll', this._scrollHandler);
+    }
+
+    // 计算分页
+    setTimeout(() => this.recalcPages(), 50);
+
+    // 显示页码指示器
+    const indicator = document.getElementById('page-indicator');
+    if (indicator) indicator.classList.add('active');
+
+    // 添加翻页触摸区
+    this._setupTapZones();
+    this._setupSwipeGesture();
+    this._setupKeyboardNav();
+  },
+
+  // 禁用分页模式（恢复滚动）
+  disablePagination() {
+    const container = document.getElementById('reader-content');
+    container.classList.remove('paginated');
+
+    // 解包 page-columns
+    const wrapper = container.querySelector('.page-columns');
+    if (wrapper) {
+      wrapper.style.transform = '';
+      while (wrapper.firstChild) {
+        container.appendChild(wrapper.firstChild);
+      }
+      wrapper.remove();
+    }
+
+    // 隐藏页码指示器
+    const indicator = document.getElementById('page-indicator');
+    if (indicator) indicator.classList.remove('active');
+
+    // 移除翻页触摸区
+    this._removeTapZones();
+    this._removeSwipeGesture();
+    this._removeKeyboardNav();
+
+    // 重新绑定滚动监听
+    this._scrollHandler = () => this.updateProgress();
+    container.addEventListener('scroll', this._scrollHandler, { passive: true });
+  },
+
+  // 计算总页数
+  recalcPages() {
+    const container = document.getElementById('reader-content');
+    const wrapper = container.querySelector('.page-columns');
+    if (!wrapper) return;
+
+    this._pageWidth = container.clientWidth;
+    wrapper.style.columnWidth = this._pageWidth + 'px';
+    wrapper.style.columnGap = '0px';
+    wrapper.style.height = container.clientHeight + 'px';
+
+    // 等待浏览器重排
+    requestAnimationFrame(() => {
+      this._totalPages = Math.max(1, Math.ceil(wrapper.scrollWidth / this._pageWidth));
+      if (this._currentPage >= this._totalPages) {
+        this._currentPage = this._totalPages - 1;
+      }
+      this.goToPage(this._currentPage);
+    });
+  },
+
+  // 翻到指定页
+  goToPage(page) {
+    page = Math.max(0, Math.min(page, this._totalPages - 1));
+    this._currentPage = page;
+
+    const wrapper = document.querySelector('.page-columns');
+    if (wrapper) {
+      wrapper.style.transform = `translateX(-${page * this._pageWidth}px)`;
+    }
+
+    this._updatePageIndicator();
+    this.updateProgress();
+  },
+
+  // 上一页
+  prevPage() {
+    if (this._currentPage > 0) {
+      this.goToPage(this._currentPage - 1);
+    }
+  },
+
+  // 下一页
+  nextPage() {
+    if (this._currentPage < this._totalPages - 1) {
+      this.goToPage(this._currentPage + 1);
+    }
+  },
+
+  // 更新页码显示
+  _updatePageIndicator() {
+    const numEl = document.getElementById('page-num');
+    if (numEl) {
+      numEl.textContent = `${this._currentPage + 1} / ${this._totalPages}`;
+    }
+    // 更新按钮禁用状态
+    const prevBtn = document.getElementById('page-prev');
+    const nextBtn = document.getElementById('page-next');
+    if (prevBtn) prevBtn.disabled = this._currentPage <= 0;
+    if (nextBtn) nextBtn.disabled = this._currentPage >= this._totalPages - 1;
+  },
+
+  // ─── 翻页触摸区 ───
+  _setupTapZones() {
+    this._removeTapZones();
+    const container = document.getElementById('reader-content');
+    const leftZone = document.createElement('div');
+    leftZone.className = 'page-tap-zone page-tap-left';
+    leftZone.id = 'tap-zone-left';
+    leftZone.addEventListener('click', () => this.prevPage());
+
+    const rightZone = document.createElement('div');
+    rightZone.className = 'page-tap-zone page-tap-right';
+    rightZone.id = 'tap-zone-right';
+    rightZone.addEventListener('click', () => this.nextPage());
+
+    container.parentElement.appendChild(leftZone);
+    container.parentElement.appendChild(rightZone);
+  },
+
+  _removeTapZones() {
+    document.getElementById('tap-zone-left')?.remove();
+    document.getElementById('tap-zone-right')?.remove();
+  },
+
+  // ─── 滑动翻页手势 ───
+  _setupSwipeGesture() {
+    this._removeSwipeGesture();
+    const container = document.getElementById('reader-content');
+    let startX = 0, startY = 0, isDragging = false;
+
+    this._touchStart = (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      isDragging = true;
+    };
+    this._touchEnd = (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      const dx = e.changedTouches[0].clientX - startX;
+      const dy = e.changedTouches[0].clientY - startY;
+      // 水平滑动幅度 > 50px 且大于垂直幅度
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+        if (dx < 0) this.nextPage();
+        else this.prevPage();
+      }
+    };
+
+    container.addEventListener('touchstart', this._touchStart, { passive: true });
+    container.addEventListener('touchend', this._touchEnd, { passive: true });
+  },
+
+  _removeSwipeGesture() {
+    const container = document.getElementById('reader-content');
+    if (this._touchStart) container.removeEventListener('touchstart', this._touchStart);
+    if (this._touchEnd) container.removeEventListener('touchend', this._touchEnd);
+    this._touchStart = null;
+    this._touchEnd = null;
+  },
+
+  // ─── 键盘翻页 ───
+  _setupKeyboardNav() {
+    this._removeKeyboardNav();
+    this._keyHandler = (e) => {
+      if (!this._paginationMode) return;
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.prevPage();
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+        e.preventDefault();
+        this.nextPage();
+      }
+    };
+    document.addEventListener('keydown', this._keyHandler);
+  },
+
+  _removeKeyboardNav() {
+    if (this._keyHandler) {
+      document.removeEventListener('keydown', this._keyHandler);
+      this._keyHandler = null;
+    }
   }
 };
 
@@ -823,6 +1113,14 @@ document.addEventListener('selectionchange', () => {
     // 短暂延迟确保选择完成
     clearTimeout(Reader._selectionTimer);
     Reader._selectionTimer = setTimeout(() => Reader.handleSelection(), 200);
+  }
+});
+
+// 窗口 resize 时重算分页
+window.addEventListener('resize', () => {
+  if (Reader._paginationMode && document.getElementById('reader-overlay').classList.contains('active')) {
+    clearTimeout(Reader._resizeTimer);
+    Reader._resizeTimer = setTimeout(() => Reader.recalcPages(), 200);
   }
 });
 

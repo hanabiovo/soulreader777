@@ -247,6 +247,11 @@
             </div>
         </div>
         <div id="reader-content"></div>
+        <div id="page-indicator">
+            <button class="page-nav-btn" id="page-prev" onclick="Reader.prevPage()">‹ 上一页</button>
+            <span id="page-num">1 / 1</span>
+            <button class="page-nav-btn" id="page-next" onclick="Reader.nextPage()">下一页 ›</button>
+        </div>
     </div>
 
     <!-- 选词 Dock -->
@@ -305,6 +310,15 @@
                 <input type="range" class="typo-slider" min="12" max="60" step="2" value="24"
                     oninput="Reader.setTypoParam('padding',this.value+'px',null);Reader.syncSliderLabel('padding-val',this.value+'px')">
                 <span class="typo-slider-val" id="padding-val">24px</span>
+            </div>
+
+            <!-- 阅读模式 -->
+            <div class="typo-group" style="margin-top:10px;">
+                <div class="typo-label">模式</div>
+                <div class="typo-options">
+                    <button class="typo-btn active" data-param="mode" data-value="scroll" onclick="Reader.togglePaginationMode(false)">滚动</button>
+                    <button class="typo-btn" data-param="mode" data-value="paginated" onclick="Reader.togglePaginationMode(true)">分页</button>
+                </div>
             </div>
 
             <!-- 阅读字体 -->
