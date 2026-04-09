@@ -1357,11 +1357,14 @@ const Reader = {
 
     if (this._dualPage) {
       // 双页：2 列可见
-      const colW = Math.floor((contentW - pageGap) / 2);
+      // 不对 colW 取整——column-count:2 已确定列数，浏览器会精确分配列宽
+      const colW = (contentW - pageGap) / 2;
       wrapper.style.columnCount = '2';
       wrapper.style.columnWidth = Math.max(colW, 100) + 'px';
       wrapper.style.columnGap = pageGap + 'px';
-      this._pageWidth = 2 * (Math.max(colW, 100) + pageGap);
+      // _pageWidth 直接用 contentW + pageGap，与浏览器实际步进一致，
+      // 避免从取整后的 colW 反推导致每页累积偏移
+      this._pageWidth = contentW + pageGap;
     } else {
       // 单页：1 列 = contentW
       wrapper.style.columnCount = '1';
