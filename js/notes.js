@@ -169,10 +169,9 @@ const Notes = {
   },
 
   // ─── 工具函数 ───
+  // 代理 App.escapeHtml，避免重复实现（App 始终先于 Notes 加载）
   escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return App.escapeHtml(text);
   },
 
   formatTime(timestamp) {

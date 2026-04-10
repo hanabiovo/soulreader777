@@ -26,6 +26,11 @@
   --read-para:      1.2em;
   --read-px:        24px;
   --read-tracking:  0.01em;
+
+  /* 封面风格变量 */
+  --cover-bg:      #faf8f3;
+  --cover-border:  #e8e5de;
+  --cover-spine:   #dedad4;
 }
 
 /* 暗色模式 */
@@ -122,3 +127,63 @@ body {
 .debug-entry.debug-error { color: #d63031; }
 .debug-entry.debug-warn  { color: #e17055; }
 .debug-entry.debug-info  { color: var(--ink-mid); }
+
+/* ─── 重复导入确认弹窗 ─── */
+#dup-import-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 900;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#dup-import-overlay.open { display: flex; }
+.dup-import-popup {
+  background: var(--bg);
+  border-radius: 14px;
+  padding: 24px;
+  width: 280px;
+  max-width: 90vw;
+}
+.dup-import-title {
+  font-family: var(--font-title);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 10px;
+  letter-spacing: 0.04em;
+}
+.dup-import-msg {
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  font-weight: 300;
+  color: var(--ink-mid);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+.dup-import-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.dup-import-btns button {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  padding: 5px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  cursor: pointer;
+  background: transparent;
+  font-family: var(--font-ui);
+  transition: all 0.18s;
+}
+.dup-import-btns button:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.dup-import-confirm-btn {
+  color: var(--ink) !important;
+  border-color: var(--ink) !important;
+}

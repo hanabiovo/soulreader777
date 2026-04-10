@@ -172,12 +172,6 @@
 .book-cover {
   aspect-ratio: 2/3;
   border-radius: 4px;
-  color: white;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: flex-start;
-  padding: 10px 8px;
   position: relative;
   cursor: pointer;
   transition: opacity 0.2s;
@@ -199,6 +193,219 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+
+/* ═══════════════════════════════════════
+   封面风格 A · 居中素白
+═══════════════════════════════════════ */
+[data-cover-style="a"] .book-cover {
+  background: var(--bg) !important;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 14px 10px;
+  text-align: center;
+  color: var(--ink);
+}
+
+[data-cover-style="a"] .book-cover .cover-title {
+  font-family: var(--font-title);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--ink);
+  margin-bottom: 6px;
+  /* 书名过长时省略 */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+  width: 100%;
+}
+
+[data-cover-style="a"] .book-cover .cover-author {
+  font-size: 9px;
+  font-weight: 200;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  min-height: 1em; /* 无作者时保留占位，避免书名跑偏 */
+}
+
+[data-cover-style="a"] .book-cover .cover-progress {
+  display: block;
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--ink-ghost);
+  border-radius: 0 0 3px 3px;
+}
+
+[data-cover-style="a"] .book-cover .cover-progress-fill {
+  height: 100%;
+  background: var(--ink-faint);
+  border-radius: inherit;
+}
+
+/* ═══════════════════════════════════════
+   封面风格 B · 书脊线
+═══════════════════════════════════════ */
+[data-cover-style="b"] .book-cover {
+  background: var(--bg) !important;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ink-ghost);
+  border-radius: 0 3px 3px 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12px 10px 10px 11px;
+  color: var(--ink);
+}
+
+[data-cover-style="b"] .book-cover .cover-title {
+  font-family: var(--font-title);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--ink);
+  margin-bottom: 4px;
+  /* 书名过长时省略 */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+[data-cover-style="b"] .book-cover .cover-author {
+  font-size: 9px;
+  font-weight: 200;
+  color: var(--ink-mid);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 1em;
+}
+
+[data-cover-style="b"] .book-cover .cover-top {
+  flex: 1;
+  overflow: hidden;
+}
+
+[data-cover-style="b"] .book-cover .cover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+[data-cover-style="b"] .book-cover .cover-pct {
+  font-size: 9px;
+  font-weight: 200;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+}
+
+/* ═══════════════════════════════════════
+   封面风格 C · 底栏分割
+═══════════════════════════════════════ */
+[data-cover-style="c"] .book-cover {
+  background: var(--bg) !important;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--ink);
+}
+
+[data-cover-style="c"] .book-cover .cover-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 10px 9px 8px;
+  overflow: hidden;
+}
+
+[data-cover-style="c"] .book-cover .cover-title {
+  font-family: var(--font-title);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--ink);
+  /* 书名过长时省略 */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+[data-cover-style="c"] .book-cover .cover-footer {
+  display: flex;
+  padding: 6px 9px;
+  border-top: 1px solid var(--rule);
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+[data-cover-style="c"] .book-cover .cover-author {
+  font-size: 9px;
+  font-weight: 200;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+  padding-right: 6px;
+}
+
+[data-cover-style="c"] .book-cover .cover-bar {
+  display: block;
+  width: 32px;
+  height: 2px;
+  background: var(--ink-ghost);
+  border-radius: 1px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+[data-cover-style="c"] .book-cover .cover-bar-fill {
+  height: 100%;
+  background: var(--ink-mid);
+  border-radius: inherit;
+}
+
+/* ─── 网格视图删除按钮 ─── */
+.book-del-btn {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+
+.book-cover:hover .book-del-btn {
+  opacity: 1;
 }
 
 /* ─── 空状态 ─── */

@@ -13,6 +13,7 @@ const Reader = {
   _currentPage: 0,
   _totalPages: 1,
   _pageWidth: 0,
+  _forceIndent: false,    // 强制首行缩进
   // PDF canvas 模式状态
   _isPdf: false,
   _pdfCurrentPage: 0,
@@ -49,10 +50,7 @@ const Reader = {
         if (this._pdfDarkMode === 'auto') this._applyPdfDarkMode();
       });
       this._themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-      // 显示页码指示器
-      const indicator = document.getElementById('page-indicator');
-      if (indicator) indicator.classList.add('active');
-      // 判断是否使用分页模式
+      // 判断是否使用分页模式（页码指示器由 _togglePdfPagination 控制）
       if (this._paginationMode) {
         this._togglePdfPagination(true);
       } else {
@@ -60,9 +58,10 @@ const Reader = {
         this._setupPdfScrollNav();
       }
       this._updatePdfPageIndicator();
-      // 绑定键盘和滑动翻页
+      // 绑定键盘、滑动和滚轮翻页
       this._setupKeyboardNav();
       this._setupSwipeGesture();
+      this._setupWheelNav();
       return;
     }
     
@@ -91,18 +90,32 @@ const Reader = {
   },
 
   // ─── 关闭阅读器 ───
-  close() {
-    // 保存阅读位置
+  async close() {
+    // 保存阅读位置（await 确保进度写入 DB 后再刷新书架）
     if (this.currentBook) {
       if (this._isPdf) {
-        // PDF 模式：保存当前页码
-        this.currentBook.currentPage = this._pdfCurrentPage || 0;
+        // PDF 模式：保存当前页码 + 统一进度比值
+        const page = this._pdfCurrentPage || 0;
+        this.currentBook.currentPage = page;
+        this.currentBook.scrollRatio = this._pdfTotalPages > 1
+          ? Math.min(1, page / (this._pdfTotalPages - 1))
+          : 0;
       } else if (this._paginationMode) {
+        // 分页模式：保存当前页索引 + 统一进度比值
         this.currentBook.currentPage = this._currentPage;
+        this.currentBook.scrollRatio = this._totalPages > 1
+          ? Math.min(1, this._currentPage / (this._totalPages - 1))
+          : 0;
       } else {
-        this.currentBook.scrollPosition = document.getElementById('reader-content').scrollTop;
+        const el = document.getElementById('reader-content');
+        this.currentBook.scrollPosition = el.scrollTop;
+        // 同时存 0~1 比值，供书架封面进度条使用
+        const scrollable = el.scrollHeight - el.clientHeight;
+        this.currentBook.scrollRatio = scrollable > 0
+          ? Math.min(1, el.scrollTop / scrollable)
+          : 0;
       }
-      Store.put('books', this.currentBook);
+      await Store.put('books', this.currentBook);
     }
 
     // 清理 PDF 模式
@@ -111,11 +124,12 @@ const Reader = {
       this._removeKeyboardNav();
       this._removeSwipeGesture();
       this._removeTapZones();
+      this._removeWheelNav();
       if (this._themeObserver) {
         this._themeObserver.disconnect();
         this._themeObserver = null;
       }
-      const indicator = document.getElementById('page-indicator');
+      const indicator = document.getElementById('page-indicator-inner');
       if (indicator) indicator.classList.remove('active');
       const container = document.getElementById('reader-content');
       container.classList.remove('pdf-content', 'pdf-inverted', 'pdf-paginated', 'pdf-dual-page');
@@ -127,7 +141,8 @@ const Reader = {
       this._removeTapZones();
       this._removeSwipeGesture();
       this._removeKeyboardNav();
-      const indicator = document.getElementById('page-indicator');
+      this._removeWheelNav();
+      const indicator = document.getElementById('page-indicator-inner');
       if (indicator) indicator.classList.remove('active');
       const container = document.getElementById('reader-content');
       container.classList.remove('paginated', 'dual-page');
@@ -140,11 +155,17 @@ const Reader = {
       }
     }
 
+    // 移除锚点点击监听
+    this._removeAnchorNav();
+
     // 移除滚动监听
     if (this._scrollHandler) {
       document.getElementById('reader-content').removeEventListener('scroll', this._scrollHandler);
       this._scrollHandler = null;
     }
+
+    // 统一清理键盘监听（幂等，多次调用无害，防止遗漏场景导致事件泄漏）
+    this._removeKeyboardNav();
 
     // 关闭阅读器和所有子面板
     document.getElementById('reader-overlay').classList.remove('active');
@@ -153,11 +174,15 @@ const Reader = {
     this.closeMemoryPanel();
     this.closeTypography();
     document.getElementById('toc-panel').classList.remove('active');
+    document.getElementById('toc-backdrop').classList.remove('active');
     
     this.currentBook = null;
     this.currentNoteId = null;
     this._isPdf = false;
     this._pdfDoc = null;
+
+    // 刷新书架，使进度条等数据与 DB 同步
+    if (typeof App !== 'undefined') App.loadShelf();
   },
 
   // ─── 更新进度条 ───
@@ -190,6 +215,12 @@ const Reader = {
       container.innerHTML = htmlContent;
       container.classList.add('epub-content');
       container.classList.remove('txt-content');
+      // 填充图片 src（用 imageMap 替换 data-epub-src 占位）
+      // 无论 imageMap 是否存在，都处理 img[data-epub-src]：
+      // 有 imageMap → 尝试填充；无 imageMap（旧书）→ 全部隐藏，避免 broken image
+      this._resolveEpubImages(this.currentBook ? this.currentBook.imageMap : null);
+      // 绑定文内锚点跳转
+      this._setupAnchorNav();
       return;
     }
 
@@ -199,11 +230,11 @@ const Reader = {
     const paragraphs = content.split(/\n+/).filter(p => p.trim());
     const html = paragraphs.map(p => {
       const trimmed = p.trim();
+      // 识别标题（以 # 开头）：先切割原始文本再转义，避免转义后 slice 截断 HTML 实体
+      if (trimmed.startsWith('### ')) return `<h3>${this.escapeHtml(trimmed.slice(4))}</h3>`;
+      if (trimmed.startsWith('## '))  return `<h2>${this.escapeHtml(trimmed.slice(3))}</h2>`;
+      if (trimmed.startsWith('# '))   return `<h1>${this.escapeHtml(trimmed.slice(2))}</h1>`;
       const escaped = this.escapeHtml(trimmed);
-      // 识别标题（以 # 开头）
-      if (trimmed.startsWith('### ')) return `<h3>${escaped.slice(4)}</h3>`;
-      if (trimmed.startsWith('## '))  return `<h2>${escaped.slice(3)}</h2>`;
-      if (trimmed.startsWith('# '))   return `<h1>${escaped.slice(2)}</h1>`;
       // 识别中文章节标题（复用 _tocPatterns）
       if (this._tocPatterns.some(re => re.test(trimmed))) {
         return `<h2 class="chapter-title">${escaped}</h2>`;
@@ -222,9 +253,12 @@ const Reader = {
     container.classList.add('pdf-content');
 
     // 生成所有页面的 <img>，每页一张
+    // .pdf-page-inner 包裹 img + text layer，确保 text layer 的 left:0 相对于 img 左边缘
     container.innerHTML = pdfPages.map((dataUrl, i) =>
-      `<div class="pdf-page" data-page="${i}" style="position:relative;">` +
-        `<img src="${dataUrl}" alt="第 ${i + 1} 页" draggable="false">` +
+      `<div class="pdf-page" data-page="${i}">` +
+        `<div class="pdf-page-inner">` +
+          `<img src="${dataUrl}" alt="第 ${i + 1} 页" draggable="false">` +
+        `</div>` +
       `</div>`
     ).join('');
   },
@@ -244,6 +278,9 @@ const Reader = {
     const pageEl = document.querySelector(`.pdf-page[data-page="${pageIndex}"]`);
     if (!pageEl || pageEl.querySelector('.pdf-text-layer')) return; // 避免重复渲染
 
+    // text layer 插入 .pdf-page-inner，使其 left:0 相对于 img 左边缘（而非 flex 容器）
+    const innerEl = pageEl.querySelector('.pdf-page-inner') || pageEl;
+
     const pdf = await this._getPdfDoc();
     if (!pdf) return;
     const page = await pdf.getPage(pageIndex + 1); // pdfjs 页码从 1 开始
@@ -253,11 +290,17 @@ const Reader = {
     // 创建 text layer 容器
     const textLayerDiv = document.createElement('div');
     textLayerDiv.className = 'pdf-text-layer';
+    textLayerDiv.style.position = 'absolute';
+    textLayerDiv.style.top = '0';
+    textLayerDiv.style.left = '0';
     textLayerDiv.style.width = viewport.width + 'px';
     textLayerDiv.style.height = viewport.height + 'px';
-    pageEl.appendChild(textLayerDiv);
+    innerEl.appendChild(textLayerDiv);
 
     const textContent = await page.getTextContent();
+
+    // pdfjs v3+ 要求在 container 上设置 --scale-factor CSS 变量
+    textLayerDiv.style.setProperty('--scale-factor', scale);
 
     // 用 pdfjs 的 TextLayer 渲染器
     pdfjsLib.renderTextLayer({
@@ -268,17 +311,21 @@ const Reader = {
     });
 
     // 等 img 加载完成后计算缩放比，对齐 text layer 与可见图片
-    const img = pageEl.querySelector('img');
-    const applyScale = () => {
-      if (!img.clientWidth) return;
-      const displayScale = img.clientWidth / viewport.width;
-      textLayerDiv.style.transform = `scale(${displayScale})`;
-      textLayerDiv.style.transformOrigin = '0 0';
+    // 使用 rAF 重试，避免 img.complete 时 clientWidth 仍为 0 的竞态问题
+    const img = innerEl.querySelector('img');
+    const tryApplyScale = () => {
+      if (img.clientWidth) {
+        const displayScale = img.clientWidth / viewport.width;
+        textLayerDiv.style.transform = `scale(${displayScale})`;
+        textLayerDiv.style.transformOrigin = '0 0';
+      } else {
+        requestAnimationFrame(tryApplyScale);
+      }
     };
     if (img.complete) {
-      applyScale();
+      requestAnimationFrame(tryApplyScale);
     } else {
-      img.addEventListener('load', applyScale, { once: true });
+      img.addEventListener('load', () => requestAnimationFrame(tryApplyScale), { once: true });
     }
   },
 
@@ -421,14 +468,18 @@ const Reader = {
   // ─── PDF：切换分页/滚动显示 ───
   _togglePdfPagination(paginated) {
     const container = document.getElementById('reader-content');
+    const pageInner = document.getElementById('page-indicator-inner');
     if (paginated) {
       container.classList.add('pdf-paginated');
       // 恢复双页 CSS 类（如果之前已开启）
       container.classList.toggle('pdf-dual-page', this._dualPage);
       // 移除滚动监听（分页模式不需要）
       this._removePdfScrollNav();
-      // 绑定翻页触摸区
+      // 绑定翻页触摸区和滚轮翻页
       this._setupTapZones();
+      this._setupWheelNav();
+      // 显示页码区
+      if (pageInner) pageInner.classList.add('active');
       // 通过 _showPdfPage 应用单/双页显示逻辑
       this._showPdfPage(this._pdfCurrentPage);
     } else {
@@ -437,8 +488,11 @@ const Reader = {
       container.querySelectorAll('.pdf-page').forEach(p => {
         p.style.display = '';
       });
-      // 移除翻页触摸区
+      // 移除翻页触摸区和滚轮翻页
       this._removeTapZones();
+      this._removeWheelNav();
+      // 隐藏页码区
+      if (pageInner) pageInner.classList.remove('active');
       // 重新绑定滚动监听
       this._setupPdfScrollNav();
       // 滚动到当前页
@@ -492,6 +546,7 @@ const Reader = {
 
   // ─── 显示目录 ───
   showTOC() {
+    document.getElementById('toc-backdrop').classList.add('active');
     const panel = document.getElementById('toc-panel');
     const list = document.getElementById('toc-list');
     const container = document.getElementById('reader-content');
@@ -578,6 +633,7 @@ const Reader = {
       }
     }
     document.getElementById('toc-panel').classList.remove('active');
+    document.getElementById('toc-backdrop').classList.remove('active');
   },
 
   // ─── 打开本书大脑面板 ───
@@ -1028,10 +1084,9 @@ const Reader = {
   },
 
   // ─── 工具函数 ───
+  // 代理 App.escapeHtml，避免重复实现（App 始终先于 Reader 加载）
   escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return App.escapeHtml(text);
   },
 
   formatText(text) {
@@ -1055,8 +1110,8 @@ const Reader = {
         }
       }
     });
-    // 滑块行也隐藏
-    document.querySelectorAll('#typography-scroll .typo-slider-row').forEach(row => {
+    // 内嵌滑块行：PDF 模式下强制隐藏，非 PDF 时清除内联样式让 CSS 类控制
+    document.querySelectorAll('#typography-scroll .typo-inline-slider').forEach(row => {
       row.style.display = isPdf ? 'none' : '';
     });
     // 字体 chip 区也隐藏
@@ -1086,7 +1141,7 @@ const Reader = {
     this._syncTypoButtons('line',    curLine);
     this._syncTypoButtons('padding', curPx);
 
-    // 同步滑块
+    // 同步滑块值和标签
     const sizeSlider = document.getElementById('slider-size');
     if (sizeSlider) sizeSlider.value = parseFloat(curSize);
     this.syncSliderLabel('size-val', curSize);
@@ -1098,6 +1153,23 @@ const Reader = {
     const padSlider = document.getElementById('slider-padding');
     if (padSlider) padSlider.value = parseFloat(curPx);
     this.syncSliderLabel('padding-val', curPx);
+
+    // 同步自定义按钮激活状态（反映滑块是否展开）
+    ['size', 'line', 'padding'].forEach(param => {
+      const sliderRow = document.getElementById(`slider-row-${param}`);
+      const customBtn = document.querySelector(`.typo-custom-btn[data-param="${param}"]`);
+      if (sliderRow && customBtn) {
+        customBtn.classList.toggle('active', sliderRow.classList.contains('expanded'));
+      }
+    });
+
+    // 同步首行缩进按钮
+    document.querySelectorAll('.typo-btn[data-param="indent"]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.value === 'on') === (this._forceIndent || false));
+    });
+    // 缩进行仅在非 PDF 模式下显示
+    const indentGroup = document.getElementById('typo-indent-group');
+    if (indentGroup) indentGroup.style.display = isPdf ? 'none' : '';
 
     // 同步阅读模式按钮
     document.querySelectorAll('.typo-btn[data-param="mode"]').forEach(btn => {
@@ -1176,19 +1248,37 @@ const Reader = {
     }
   },
 
-  // 渲染「字」面板中的配色 chip（内置 + 用户自定义）
+  // 渲染「字」面板中的配色 chip（与全局配色库同步：内置 COLOR_PRESETS + 用户方案）
   renderTypoColorChips() {
-    const userContainer = document.getElementById('typo-user-color-chips');
-    if (!userContainer) return;
-    const schemes = JSON.parse(localStorage.getItem('color-schemes') || '[]');
-    userContainer.innerHTML = schemes.map((s, i) => `
-      <div class="typo-color-chip" style="background:${s.bg};"
+    const container = document.getElementById('typo-color-chips');
+    if (!container) return;
+
+    // 读取当前阅读配色 override（用于标记激活项）
+    const saved = JSON.parse(localStorage.getItem('read-layout') || '{}');
+    const activeBg = saved.readBg || null;
+
+    // 内置配色
+    const builtinHtml = (typeof COLOR_PRESETS !== 'undefined' ? COLOR_PRESETS : []).map(p => {
+      const isActive = activeBg === p.bg ? ' active' : '';
+      return `<div class="typo-color-chip${isActive}" style="background:${p.bg};"
+        title="${App.escapeHtml(p.name)}"
+        onclick="Reader.setReadColor('${p.bg}','${p.ink}',this)"></div>`;
+    }).join('');
+
+    // 用户自定义配色
+    const userSchemes = JSON.parse(localStorage.getItem('color-schemes') || '[]');
+    const userHtml = userSchemes.map(s => {
+      const isActive = activeBg === s.bg ? ' active' : '';
+      return `<div class="typo-color-chip${isActive}" style="background:${s.bg};"
         title="${App.escapeHtml(s.name)}"
-        onclick="Reader.setReadColor('${s.bg}','${s.ink}',this)"></div>
-    `).join('');
+        onclick="Reader.setReadColor('${s.bg}','${s.ink}',this)"></div>`;
+    }).join('');
+
+    container.innerHTML = builtinHtml + userHtml;
   },
 
   // 设置阅读区专属配色（--read-bg / --read-ink，不影响全局）
+  // 同时记录当前全局 --bg 快照，用于检测全局配色是否已变更
   setReadColor(bg, ink, el) {
     const content = document.getElementById('reader-content');
     if (content) {
@@ -1198,11 +1288,32 @@ const Reader = {
     // 更新 chip 激活状态
     document.querySelectorAll('.typo-color-chip').forEach(c => c.classList.remove('active'));
     if (el) el.classList.add('active');
-    // 持久化
+    // 持久化：同时保存全局色快照（用于软性联动检测）
+    const globalBg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
     const saved = JSON.parse(localStorage.getItem('read-layout') || '{}');
     saved.readBg = bg;
     saved.readInk = ink;
+    saved.readColorGlobalSnapshot = globalBg;
     localStorage.setItem('read-layout', JSON.stringify(saved));
+  },
+
+  // 清除阅读配色 override，回退到全局配色（由 settings.js 在全局配色变更时调用）
+  clearReadColorOverride() {
+    const saved = JSON.parse(localStorage.getItem('read-layout') || '{}');
+    delete saved.readBg;
+    delete saved.readInk;
+    delete saved.readColorGlobalSnapshot;
+    localStorage.setItem('read-layout', JSON.stringify(saved));
+    // 清除 reader-content 上的内联 CSS 变量，回退到全局 --bg/--ink
+    const content = document.getElementById('reader-content');
+    if (content) {
+      content.style.removeProperty('--read-bg');
+      content.style.removeProperty('--read-ink');
+    }
+    // 若字面板已打开，刷新 chip 激活状态
+    if (document.getElementById('typography-panel')?.classList.contains('active')) {
+      this.renderTypoColorChips();
+    }
   },
 
   // 排版参数切换（供 HTML 按钮调用）
@@ -1217,19 +1328,17 @@ const Reader = {
 
     document.documentElement.style.setProperty(cssVar, value);
 
-    // btn 可能为 null（滑块直接调用时传 null），只在有 btn 时更新激活状态
-    if (btn) {
-      const optionsContainer = btn.closest('.typo-options');
-      if (optionsContainer) {
-        optionsContainer.querySelectorAll('.typo-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-      }
-    }
+    // 同步按钮激活状态 & 自定义滑块展开/收起
+    this._syncTypoButtons(param, value);
 
-    // 同步同组的档位按钮激活状态（滑块拖动时也同步）
-    document.querySelectorAll(`.typo-btn[data-param="${param}"]`).forEach(b => {
-      b.classList.toggle('active', b.dataset.value === value);
-    });
+    // 点击预设按钮时收起自定义滑块；滑块拖动时（btn=null）展开并激活自定义按钮
+    if (btn) {
+      // 预设按钮被点击 → 收起滑块
+      const sliderRow = document.getElementById(`slider-row-${param}`);
+      if (sliderRow) sliderRow.classList.remove('expanded');
+    }
+    // 若 btn 为 null（滑块拖动），_syncTypoButtons 已处理激活状态；
+    // 滑块行本身已是 expanded（用户点击"自定义"后展开），无需额外操作
 
     // 持久化（与设置页共享同一 key）
     const saved = JSON.parse(localStorage.getItem('read-layout') || '{}');
@@ -1243,11 +1352,18 @@ const Reader = {
     }
   },
 
-  // 同步按钮激活状态
+  // 同步按钮激活状态（自定义按钮激活状态由滑块展开状态决定，不由值决定）
   _syncTypoButtons(param, currentValue) {
     document.querySelectorAll(`.typo-btn[data-param="${param}"]`).forEach(btn => {
+      if (btn.dataset.value === 'custom') return; // 自定义按钮单独处理
       btn.classList.toggle('active', btn.dataset.value === currentValue);
     });
+    // 自定义按钮激活状态 = 滑块是否展开
+    const sliderRow = document.getElementById(`slider-row-${param}`);
+    const customBtn = document.querySelector(`.typo-custom-btn[data-param="${param}"]`);
+    if (customBtn && sliderRow) {
+      customBtn.classList.toggle('active', sliderRow.classList.contains('expanded'));
+    }
   },
 
   // 从 localStorage 恢复排版设置（open() 时调用）
@@ -1257,17 +1373,72 @@ const Reader = {
     if (saved.size)    root.style.setProperty('--read-size', saved.size);
     if (saved.line)    root.style.setProperty('--read-line', saved.line);
     if (saved.padding) root.style.setProperty('--read-px',   saved.padding);
-    // 恢复阅读专属配色
+    // 恢复阅读专属配色（软性联动：若全局配色已变更，则清除 override）
     const rc = document.getElementById('reader-content');
     if (rc) {
-      if (saved.readBg)  rc.style.setProperty('--read-bg',  saved.readBg);
-      if (saved.readInk) rc.style.setProperty('--read-ink', saved.readInk);
+      if (saved.readBg && saved.readInk) {
+        // 检查全局配色是否自上次设置 override 后发生了变化
+        const currentGlobalBg = getComputedStyle(root).getPropertyValue('--bg').trim();
+        const snapshot = saved.readColorGlobalSnapshot || '';
+        if (snapshot && snapshot !== currentGlobalBg) {
+          // 全局配色已变更，清除 override，回退到全局色
+          delete saved.readBg;
+          delete saved.readInk;
+          delete saved.readColorGlobalSnapshot;
+          localStorage.setItem('read-layout', JSON.stringify(saved));
+        } else {
+          rc.style.setProperty('--read-bg',  saved.readBg);
+          rc.style.setProperty('--read-ink', saved.readInk);
+        }
+      }
     }
     // 恢复阅读模式
     this._paginationMode = saved.paginationMode || false;
     this._dualPage = saved.dualPage || false;
     // 恢复 PDF 反色模式
     this._pdfDarkMode = saved.pdfDarkMode || 'auto';
+    // 恢复首行缩进
+    this._forceIndent = saved.forceIndent || false;
+    const content = document.getElementById('reader-content');
+    if (content) content.classList.toggle('force-indent', this._forceIndent);
+  },
+
+  // 切换首行缩进（供「字」面板按钮调用）
+  toggleIndent(on) {
+    this._forceIndent = on;
+    // 持久化
+    const saved = JSON.parse(localStorage.getItem('read-layout') || '{}');
+    saved.forceIndent = on;
+    localStorage.setItem('read-layout', JSON.stringify(saved));
+    // 应用到内容区
+    const content = document.getElementById('reader-content');
+    if (content) content.classList.toggle('force-indent', on);
+    // 同步按钮状态
+    document.querySelectorAll('.typo-btn[data-param="indent"]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.value === 'on') === on);
+    });
+  },
+
+  // 切换自定义滑块展开/收起（供「字」面板"自定义"按钮调用）
+  toggleCustomSlider(param) {
+    const sliderRow = document.getElementById(`slider-row-${param}`);
+    if (!sliderRow) return;
+    const isExpanded = sliderRow.classList.toggle('expanded');
+    // 同步自定义按钮激活状态
+    const customBtn = document.querySelector(`.typo-custom-btn[data-param="${param}"]`);
+    if (customBtn) customBtn.classList.toggle('active', isExpanded);
+    // 若展开，确保滑块值与当前 CSS 变量同步
+    if (isExpanded) {
+      const varMap = { size: '--read-size', line: '--read-line', padding: '--read-px' };
+      const cssVar = varMap[param];
+      if (cssVar) {
+        const curVal = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
+        const slider = document.getElementById(`slider-${param}`);
+        if (slider && curVal) slider.value = parseFloat(curVal);
+        const labelId = param === 'padding' ? 'padding-val' : `${param}-val`;
+        this.syncSliderLabel(labelId, curVal);
+      }
+    }
   },
 
   // ═══ 分页引擎 ═══
@@ -1354,13 +1525,14 @@ const Reader = {
     setTimeout(() => this.recalcPages(), 80);
 
     // 显示页码指示器
-    const indicator = document.getElementById('page-indicator');
+    const indicator = document.getElementById('page-indicator-inner');
     if (indicator) indicator.classList.add('active');
 
     // 添加翻页触摸区
     this._setupTapZones();
     this._setupSwipeGesture();
     this._setupKeyboardNav();
+    this._setupWheelNav();
   },
 
   // 禁用分页模式（恢复滚动）
@@ -1383,17 +1555,69 @@ const Reader = {
     }
 
     // 隐藏页码指示器
-    const indicator = document.getElementById('page-indicator');
+    const indicator = document.getElementById('page-indicator-inner');
     if (indicator) indicator.classList.remove('active');
 
     // 移除翻页触摸区
     this._removeTapZones();
     this._removeSwipeGesture();
     this._removeKeyboardNav();
+    this._removeWheelNav();
 
     // 重新绑定滚动监听
     this._scrollHandler = () => this.updateProgress();
     container.addEventListener('scroll', this._scrollHandler, { passive: true });
+  },
+
+  // ─── 阅读位置锚定：字符偏移锚点（简化版 CFI） ───
+  //
+  // 原理（参考主流 EPUB 阅读器的 CFI 方案）：
+  //   1. 捕获：用 TreeWalker 遍历 .page-columns 内所有文本节点，
+  //      累加字符数，找到当前页第一个可见文本节点，
+  //      记录其全局字符偏移（charOffset）。
+  //      "当前页第一个文本节点"通过 offsetLeft 判断：
+  //      只需找到第一个 offsetLeft >= pageStart 的文本节点父元素即可，
+  //      仅读一次 offsetLeft，不循环触发重排。
+  //   2. 恢复：重排后再次用 TreeWalker 遍历，累加到 charOffset，
+  //      找到对应文本节点，读一次 offsetLeft 定位新页码。
+  //
+  // 降级：若 _totalPages <= 1 或捕获失败，回退到比例方案。
+  _captureAnchor() {
+    const container = document.getElementById('reader-content');
+    const wrapper = container.querySelector('.page-columns');
+    if (!wrapper || !this._pageWidth || !this._totalPages) return null;
+
+    // 降级：第 0 页直接返回 charOffset=0
+    if (this._currentPage === 0) return { charOffset: 0 };
+
+    const cs = getComputedStyle(container);
+    const padL = parseFloat(cs.paddingLeft) || 0;
+    const pageStart = this._currentPage * this._pageWidth;
+
+    // TreeWalker 遍历文本节点，累加字符偏移
+    const walker = document.createTreeWalker(wrapper, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        return node.nodeValue && node.nodeValue.trim()
+          ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      }
+    });
+
+    let charOffset = 0;
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent) { charOffset += node.nodeValue.length; continue; }
+      // 只对"可能在当前页"的节点读一次 offsetLeft
+      const elLeft = parent.offsetLeft - padL;
+      if (elLeft >= pageStart) {
+        // 找到当前页第一个文本节点，记录此时的累计偏移
+        return { charOffset };
+      }
+      charOffset += node.nodeValue.length;
+    }
+
+    // 未找到（已在最后一页），回退到比例
+    return { ratio: this._currentPage / this._totalPages };
   },
 
   // 计算总页数（核心：正确处理 padding、单/双页）
@@ -1401,6 +1625,9 @@ const Reader = {
     const container = document.getElementById('reader-content');
     const wrapper = container.querySelector('.page-columns');
     if (!wrapper) return;
+
+    // ── 重排前：捕获当前页首行锚点 ──
+    const anchor = this._captureAnchor();
 
     // 重算时临时禁用翻页动画，避免滑块拖动时抖动
     wrapper.style.transition = 'none';
@@ -1414,10 +1641,8 @@ const Reader = {
 
     // 内容区可用尺寸（扣除 padding）
     let contentW = container.clientWidth - padL - padR;
-    // 动态获取底部页码指示栏实际高度（含 safe-area-inset-bottom）
-    const indicator = document.getElementById('page-indicator');
-    const indicatorH = indicator ? indicator.offsetHeight : 40;
-    let contentH = container.clientHeight - padT - padB - indicatorH;
+    // 底栏常驻，高度固定，内容区高度直接使用 clientHeight（底栏在 flex 布局外）
+    let contentH = container.clientHeight - padT - padB;
 
     // 兜底保护：确保有效数值（不修改 DOM padding，仅限制计算值）
     contentW = Math.max(contentW, 200);
@@ -1452,7 +1677,45 @@ const Reader = {
         const sw = wrapper.scrollWidth;
         this._totalPages = Math.max(1, Math.ceil(sw / this._pageWidth));
 
-        if (this._currentPage >= this._totalPages) {
+        // ── 重排后：按字符偏移恢复页码（简化版 CFI） ──
+        if (anchor && anchor.charOffset != null) {
+          if (anchor.charOffset === 0) {
+            this._currentPage = 0;
+          } else {
+            // 重新遍历文本节点，累加到 charOffset，找对应节点的新页码
+            const walker2 = document.createTreeWalker(wrapper, NodeFilter.SHOW_TEXT, {
+              acceptNode(node) {
+                return node.nodeValue && node.nodeValue.trim()
+                  ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+              }
+            });
+            let accumulated = 0;
+            let found = false;
+            let tn;
+            while ((tn = walker2.nextNode())) {
+              const len = tn.nodeValue.length;
+              if (accumulated + len > anchor.charOffset) {
+                // 找到目标节点，读一次 offsetLeft 定位新页码
+                const parent = tn.parentElement;
+                if (parent) {
+                  const elLeft = parent.offsetLeft - padL;
+                  const newPage = Math.floor(elLeft / this._pageWidth);
+                  this._currentPage = Math.max(0, Math.min(newPage, this._totalPages - 1));
+                  found = true;
+                }
+                break;
+              }
+              accumulated += len;
+            }
+            if (!found) {
+              this._currentPage = Math.min(this._currentPage, this._totalPages - 1);
+            }
+          }
+        } else if (anchor && anchor.ratio != null) {
+          // 降级：比例方案
+          const newPage = Math.round(anchor.ratio * this._totalPages);
+          this._currentPage = Math.max(0, Math.min(newPage, this._totalPages - 1));
+        } else if (this._currentPage >= this._totalPages) {
           this._currentPage = this._totalPages - 1;
         }
 
@@ -1521,26 +1784,87 @@ const Reader = {
   },
 
   // ─── 翻页触摸区 ───
+  // 策略：tap zone 本身 pointer-events:none（不拦截任何事件），
+  // 改在 reader-overlay 上监听 mousedown/touchstart，
+  // 根据坐标判断是否落在左/右 30% 区域，再区分点击与拖拽。
+  // Y 轴限制：只在 #reader-content 的实际内容区内响应，排除顶栏和底栏。
   _setupTapZones() {
     this._removeTapZones();
-    const container = document.getElementById('reader-content');
-    const leftZone = document.createElement('div');
-    leftZone.className = 'page-tap-zone page-tap-left';
-    leftZone.id = 'tap-zone-left';
-    leftZone.addEventListener('click', () => this.prevPage());
+    const overlay = document.getElementById('reader-overlay');
 
-    const rightZone = document.createElement('div');
-    rightZone.className = 'page-tap-zone page-tap-right';
-    rightZone.id = 'tap-zone-right';
-    rightZone.addEventListener('click', () => this.nextPage());
+    // 获取内容区 Y 轴有效范围（排除顶栏 header，底栏已在 flex 布局中独立）
+    const _getContentYRange = () => {
+      const content = document.getElementById('reader-content');
+      if (!content) return { top: 48, bottom: window.innerHeight - 48 };
+      const rect = content.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    };
 
-    container.parentElement.appendChild(leftZone);
-    container.parentElement.appendChild(rightZone);
+    let downX = 0, downY = 0, downTime = 0;
+
+    this._tapMouseDown = (e) => {
+      downX = e.clientX; downY = e.clientY; downTime = Date.now();
+    };
+    this._tapMouseUp = (e) => {
+      // 有文字选中则不翻页
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      // 移动超过 8px 视为拖拽
+      if (Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8) return;
+      // 按下时间超过 500ms 视为长按，不翻页
+      if (Date.now() - downTime > 500) return;
+      // Y 轴：必须在内容区内（排除顶栏和底栏）
+      const { top, bottom } = _getContentYRange();
+      const y = e.clientY;
+      if (y < top || y > bottom) return;
+      // 判断点击区域（相对于视口宽度）
+      const w = window.innerWidth;
+      const x = e.clientX;
+      if (x < w * 0.3) this.prevPage();
+      else if (x > w * 0.7) this.nextPage();
+    };
+
+    this._tapTouchStart = (e) => {
+      downX = e.touches[0].clientX;
+      downY = e.touches[0].clientY;
+      downTime = Date.now();
+    };
+    this._tapTouchEnd = (e) => {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - downX;
+      const dy = t.clientY - downY;
+      // 移动超过 8px 视为划词/滚动，不翻页
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) return;
+      // 按下时间超过 500ms 视为长按，不翻页
+      if (Date.now() - downTime > 500) return;
+      // Y 轴：必须在内容区内（排除顶栏和底栏）
+      const { top, bottom } = _getContentYRange();
+      const y = t.clientY;
+      if (y < top || y > bottom) return;
+      const w = window.innerWidth;
+      const x = t.clientX;
+      if (x < w * 0.3) this.prevPage();
+      else if (x > w * 0.7) this.nextPage();
+    };
+
+    overlay.addEventListener('mousedown', this._tapMouseDown);
+    overlay.addEventListener('mouseup', this._tapMouseUp);
+    overlay.addEventListener('touchstart', this._tapTouchStart, { passive: true });
+    overlay.addEventListener('touchend', this._tapTouchEnd, { passive: true });
   },
 
   _removeTapZones() {
-    document.getElementById('tap-zone-left')?.remove();
-    document.getElementById('tap-zone-right')?.remove();
+    const overlay = document.getElementById('reader-overlay');
+    if (this._tapMouseDown)  overlay.removeEventListener('mousedown',  this._tapMouseDown);
+    if (this._tapMouseUp)    overlay.removeEventListener('mouseup',    this._tapMouseUp);
+    if (this._tapTouchStart) overlay.removeEventListener('touchstart', this._tapTouchStart);
+    if (this._tapTouchEnd)   overlay.removeEventListener('touchend',   this._tapTouchEnd);
+    this._tapMouseDown = null;
+    this._tapMouseUp   = null;
+    this._tapTouchStart = null;
+    this._tapTouchEnd   = null;
   },
 
   // ─── 滑动翻页手势 ───
@@ -1599,6 +1923,106 @@ const Reader = {
       document.removeEventListener('keydown', this._keyHandler);
       this._keyHandler = null;
     }
+  },
+
+  // ─── 鼠标滚轮翻页 ───
+  _setupWheelNav() {
+    this._removeWheelNav();
+    // 节流：两次滚轮翻页间隔至少 350ms，避免连续触发
+    // 分页模式下 #reader-content 已 overflow:hidden，无需 preventDefault
+    let lastWheel = 0;
+    this._wheelHandler = (e) => {
+      if (!this._paginationMode) return;
+      // 若有文字选中则不翻页
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      const now = Date.now();
+      if (now - lastWheel < 350) return;
+      lastWheel = now;
+      if (e.deltaY > 0 || e.deltaX > 0) {
+        this.nextPage();
+      } else if (e.deltaY < 0 || e.deltaX < 0) {
+        this.prevPage();
+      }
+    };
+    const overlay = document.getElementById('reader-overlay');
+    // passive:true —— 不阻塞浏览器滚动线程，消除延迟
+    overlay.addEventListener('wheel', this._wheelHandler, { passive: true });
+  },
+
+  _removeWheelNav() {
+    if (this._wheelHandler) {
+      const overlay = document.getElementById('reader-overlay');
+      overlay.removeEventListener('wheel', this._wheelHandler);
+      this._wheelHandler = null;
+    }
+  },
+
+  // ─── 文内锚点跳转（EPUB 内部 #xxx 链接） ───
+  _setupAnchorNav() {
+    this._removeAnchorNav();
+    const container = document.getElementById('reader-content');
+
+    this._anchorClickHandler = (e) => {
+      // 找到最近的带 data-anchor 属性的 <a> 元素
+      const link = e.target.closest('a[data-anchor]');
+      if (!link) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const targetId = link.dataset.anchor;
+      const targetEl = container.querySelector(`[id="${CSS.escape(targetId)}"]`);
+      if (!targetEl) return;
+
+      if (this._paginationMode) {
+        // 分页模式：找到目标元素所在页并跳转
+        const wrapper = container.querySelector('.page-columns');
+        if (!wrapper) return;
+        const padL = parseFloat(getComputedStyle(container).paddingLeft) || 0;
+        const elLeft = targetEl.offsetLeft - padL;
+        const page = Math.floor(elLeft / this._pageWidth);
+        this.goToPage(Math.max(0, Math.min(page, this._totalPages - 1)));
+      } else {
+        // 滚动模式：直接滚动到目标元素
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
+    container.addEventListener('click', this._anchorClickHandler);
+  },
+
+  _removeAnchorNav() {
+    if (this._anchorClickHandler) {
+      const container = document.getElementById('reader-content');
+      if (container) container.removeEventListener('click', this._anchorClickHandler);
+      this._anchorClickHandler = null;
+    }
+  },
+
+  // ─── EPUB 图片填充：将 data-epub-src 替换为 imageMap 中的 dataURL ───
+  _resolveEpubImages(imageMap) {
+    const container = document.getElementById('reader-content');
+    if (!container) return;
+    container.querySelectorAll('img[data-epub-src]').forEach(img => {
+      // imageMap 不存在（旧版导入的书）：直接隐藏，避免显示 broken image
+      if (!imageMap) {
+        img.style.display = 'none';
+        return;
+      }
+      const src = img.dataset.epubSrc;
+      if (!src) { img.style.display = 'none'; return; }
+      // 尝试多种 key 匹配：原始路径、去掉 ../ 前缀的路径、仅文件名
+      const dataUrl = imageMap[src]
+        || imageMap[src.replace(/^(\.\.\/)+/, '')]
+        || imageMap[src.split('/').pop()];
+      if (dataUrl) {
+        img.src = dataUrl;
+        img.removeAttribute('data-epub-src');
+      } else {
+        // 找不到对应图片：隐藏元素，避免显示破损图标
+        img.style.display = 'none';
+      }
+    });
   }
 };
 

@@ -8,17 +8,40 @@ const Parser = {
     'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'em', 'i', 'strong', 'b', 'blockquote', 'ul', 'ol', 'li',
     'span', 'div', 'section', 'article', 'aside', 'header',
-    'sup', 'sub', 'small', 'hr'
+    'sup', 'sub', 'small', 'hr', 'a'
   ]),
 
   sanitizeHTML(bodyEl) {
-    // 移除 script / style / img / svg / link 等不安全/不需要的元素
-    bodyEl.querySelectorAll('script, style, link, img, svg, iframe, object, embed, video, audio, canvas, form, input, button').forEach(el => el.remove());
-    // 移除所有内联 style 和 class 属性（保持纯净语义）
+    // 移除不安全/不需要的元素（保留 img，由调用方决定是否替换 src）
+    bodyEl.querySelectorAll('script, style, link, svg, iframe, object, embed, video, audio, canvas, form, input, button').forEach(el => el.remove());
+    // 清理属性
     bodyEl.querySelectorAll('*').forEach(el => {
-      el.removeAttribute('style');
-      el.removeAttribute('class');
-      el.removeAttribute('id');
+      if (el.tagName === 'IMG') {
+        // img：先读取需要保留的属性，再清除所有属性，最后重设白名单属性
+        const src = el.getAttribute('src') || '';
+        const alt = el.getAttribute('alt') || '';
+        const cls = el.getAttribute('class') || '';
+        while (el.attributes.length > 0) el.removeAttribute(el.attributes[0].name);
+        if (src) el.setAttribute('data-epub-src', src);
+        if (alt) el.setAttribute('alt', alt);
+        // 保留 class（供 CSS 样式规则匹配，如 hangz-illustrations 行内公式图片）
+        if (cls) el.setAttribute('class', cls);
+      } else if (el.tagName === 'A') {
+        el.removeAttribute('style');
+        el.removeAttribute('class');
+        // 对 <a> 标签：只保留 #xxx 内部锚点，外部链接移除 href
+        const href = el.getAttribute('href') || '';
+        if (href.startsWith('#') && href.length > 1) {
+          el.setAttribute('data-anchor', href.slice(1));
+          el.removeAttribute('href');
+        } else {
+          el.removeAttribute('href');
+        }
+      } else {
+        el.removeAttribute('style');
+        el.removeAttribute('class');
+        // 保留 id 属性（供锚点跳转目标使用）
+      }
     });
     return bodyEl.innerHTML.trim();
   },
@@ -35,7 +58,11 @@ const Parser = {
     
     // 提取书名
     const titleEl = opfDoc.querySelector('title');
-    const title = titleEl ? titleEl.textContent : file.name;
+    const title = titleEl ? titleEl.textContent.trim() : file.name;
+
+    // 提取作者（dc:creator，兼容带命名空间和不带命名空间两种写法）
+    const creatorEl = opfDoc.querySelector('creator') || opfDoc.querySelector('dc\\:creator');
+    const author = creatorEl ? creatorEl.textContent.trim() : '';
 
     // 提取章节
     const manifest = {};
@@ -51,7 +78,39 @@ const Parser = {
     const basePath = opfFile.substring(0, opfFile.lastIndexOf('/') + 1);
     const textChapters = [];
     const htmlChapters = [];
-    
+
+    // ─── 提取图片：相对路径 → base64 dataURL（单图 > 300KB 跳过）───
+    const IMAGE_SIZE_LIMIT = 300 * 1024; // 300 KB（原始字节，base64 约 +33%）
+    const IMAGE_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
+    const imageMap = {}; // { 'images/cover.jpg': 'data:image/jpeg;base64,...' }
+
+    for (const [zipPath, zipEntry] of Object.entries(zip.files)) {
+      if (zipEntry.dir) continue;
+      const ext = zipPath.split('.').pop().toLowerCase();
+      if (!IMAGE_MIME[ext]) continue;
+      // 跳过超大图片
+      const rawSize = zipEntry._data ? (zipEntry._data.uncompressedSize || 0) : 0;
+      if (rawSize > IMAGE_SIZE_LIMIT) continue;
+      try {
+        const bytes = await zipEntry.async('uint8array');
+        if (bytes.length > IMAGE_SIZE_LIMIT) continue; // 二次检查实际大小
+        // 转 base64（分块处理，避免大图触发调用栈溢出）
+        const CHUNK = 8192;
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+        }
+        const b64 = btoa(binary);
+        const mime = IMAGE_MIME[ext];
+        // 存两种 key：zip 全路径 和 相对于 basePath 的路径（章节 src 通常是相对路径）
+        const relPath = zipPath.startsWith(basePath) ? zipPath.slice(basePath.length) : zipPath;
+        imageMap[relPath] = `data:${mime};base64,${b64}`;
+        imageMap[zipPath] = `data:${mime};base64,${b64}`; // 也存全路径备用
+      } catch (e) {
+        // 单张图片失败不影响整体
+      }
+    }
+
     for (const href of spine) {
       if (!href) continue;
       const fullPath = basePath + href;
@@ -69,8 +128,10 @@ const Parser = {
 
     return {
       title,
+      author,
       content: textChapters.join('\n\n'),
       htmlContent: htmlChapters.join('<hr class="chapter-break">'),
+      imageMap,   // { relPath: dataURL } 供阅读器渲染时填充 img src
       format: 'epub',
       size: file.size,
       chapters: textChapters.length

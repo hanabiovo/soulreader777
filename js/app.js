@@ -164,42 +164,128 @@ const App = {
   // 网格视图
   renderGridView(container) {
     container.innerHTML = this.books.map(book => {
-      const color = book.color || this.randomColor();
-      // book.id 由 autoIncrement 生成为数字，需保证传参一致
+      // 使用 data-id 属性而非内联 onclick 注入 id，防止 id 被污染时的 XSS 风险
       return `
-        <div class="book-cover" style="background: ${color}" onclick="App.openBook(${book.id})">
-          <div class="book-cover-title">${this.escapeHtml(book.title)}</div>
+        <div class="book-cover" data-book-id="${parseInt(book.id) || 0}">
+          ${this._getCoverInnerHTML(book)}
         </div>
       `;
     }).join('');
+    // 事件委托：统一在容器上监听点击
+    container.querySelectorAll('.book-cover').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = parseInt(el.dataset.bookId);
+        if (id) App.openBook(id);
+      });
+    });
+  },
+
+  // 按当前封面风格生成独立 DOM（switch 模式，避免节点互相干扰）
+  _getCoverInnerHTML(b) {
+    const style = localStorage.getItem('sr_cover_style') || 'c';
+
+    // 进度计算：优先用 scrollRatio（0~1），关闭阅读器时由 reader.js 写入
+    // 旧数据无此字段时回退为 0
+    const pct = b.scrollRatio != null
+      ? Math.min(100, Math.round(b.scrollRatio * 100))
+      : 0;
+
+    // 作者：优先用 b.author 字段；其次从书名解析 "书名 - 作者" 格式
+    let rawTitle = (b.title || '').replace(/\.(txt|pdf|epub)$/i, '');
+    let rawAuthor = b.author || '';
+    if (!rawAuthor) {
+      const m = rawTitle.match(/^(.+?)\s*[-—]\s*(.+)$/);
+      if (m) { rawTitle = m[1].trim(); rawAuthor = m[2].trim(); }
+    }
+    const title  = this.escapeHtml(rawTitle);
+    const author = this.escapeHtml(rawAuthor);
+    // data-del-id 由外层事件委托处理，不直接注入 id 到 onclick
+    const delBtn = `<div class="book-del-btn" data-del-id="${parseInt(b.id) || 0}">×</div>`;
+
+    switch (style) {
+      case 'a':
+        return `
+          <div class="cover-title">${title}</div>
+          <div class="cover-author">${author}</div>
+          <div class="cover-progress">
+            <div class="cover-progress-fill" style="width:${pct}%"></div>
+          </div>
+          ${delBtn}
+        `;
+
+      case 'b':
+        return `
+          <div class="cover-top">
+            <div class="cover-title">${title}</div>
+            <div class="cover-author">${author}</div>
+          </div>
+          <div class="cover-footer">
+            <span class="cover-pct">${pct > 0 ? pct + '%' : ''}</span>
+          </div>
+          ${delBtn}
+        `;
+
+      case 'c':
+      default:
+        return `
+          <div class="cover-body">
+            <div class="cover-title">${title}</div>
+          </div>
+          <div class="cover-footer">
+            <span class="cover-author">${author}</span>
+            <div class="cover-bar">
+              <div class="cover-bar-fill" style="width:${pct}%"></div>
+            </div>
+          </div>
+          ${delBtn}
+        `;
+    }
   },
 
   // 列表视图
   renderListView(container) {
     container.innerHTML = this.books.map(book => {
-      // content 可能不存在（PDF 模式），兼容处理
-      const contentLen = (book.content || '').length;
-      const progress = book.scrollPosition && contentLen
-        ? Math.round((book.scrollPosition / contentLen) * 100)
+      // 进度：统一使用 scrollRatio（0~1），与网格视图数据源一致
+      // scrollRatio 由 reader.js close() 写入，覆盖滚动/分页/PDF 三种模式
+      const progress = book.scrollRatio != null
+        ? Math.min(100, Math.round(book.scrollRatio * 100))
         : 0;
+      const contentLen = (book.content || '').length;
       const charCount = contentLen ? this.formatCharCount(contentLen) : '–';
       // format 字段：兼容旧字段名 type
       const fmt = (book.format || book.type || '?').toUpperCase();
       const meta = `${fmt} · ${charCount} · ${this.formatTime(book.lastOpenedAt)}`;
+      const safeId = parseInt(book.id) || 0;
       
       return `
-        <div class="book-item-list" onclick="App.openBook(${book.id})">
+        <div class="book-item-list" data-book-id="${safeId}">
           <div class="book-info">
             <div class="book-title">${this.escapeHtml(book.title)}</div>
             <div class="book-meta">${meta}</div>
           </div>
           <div class="book-actions">
             <span class="book-progress">${progress}%</span>
-            <span class="book-delete" onclick="event.stopPropagation(); App.deleteBook(${book.id})">删</span>
+            <span class="book-delete" data-del-id="${safeId}">删</span>
           </div>
         </div>
       `;
     }).join('');
+    // 事件委托：统一在容器上监听点击
+    container.querySelectorAll('.book-item-list').forEach(el => {
+      el.addEventListener('click', (e) => {
+        // 点击删除按钮时不打开书籍
+        if (e.target.closest('[data-del-id]')) return;
+        const id = parseInt(el.dataset.bookId);
+        if (id) App.openBook(id);
+      });
+    });
+    container.querySelectorAll('[data-del-id]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = parseInt(el.dataset.delId);
+        if (id) App.deleteBook(id);
+      });
+    });
   },
 
   // 打开书籍
@@ -222,13 +308,10 @@ const App = {
     // 删除书籍
     await Store.delete('books', bookId);
     
-    // 删除相关笔记
+    // 批量删除相关笔记（收集所有待删 ID，减少 IndexedDB 事务次数）
     const notes = await Store.getAll('notes');
-    for (const note of notes) {
-      if (note.bookId === bookId) {
-        await Store.delete('notes', note.id);
-      }
-    }
+    const toDelete = notes.filter(n => n.bookId === bookId);
+    await Promise.all(toDelete.map(n => Store.delete('notes', n.id)));
     
     this.showToast('已删除');
     await this.loadShelf();
@@ -254,22 +337,36 @@ const App = {
       const bookData = isPdf
         ? await Parser.parsePDF(file, onProgress)
         : await Parser.parse(file);
-      
+
+      // ── 重复导入检测 ──
+      const existing = (this.books || []).find(
+        b => b.title === bookData.title && b.size === bookData.size
+      );
+      if (existing) {
+        // 弹出确认对话框，等待用户决定
+        const confirmed = await this._confirmDupImport(bookData.title);
+        if (!confirmed) return; // 用户取消，静默退出
+      }
+
       const book = {
-        // 注意：不预设 id，让 IndexedDB autoIncrement 生成
+        // 若覆盖已有书籍，保留其 id（IndexedDB put 会覆盖同 id 记录）
+        ...(existing ? { id: existing.id } : {}),
         title: bookData.title,
+        author: bookData.author || '',     // EPUB 从 OPF <creator> 读取；TXT/PDF 留空
         content: bookData.content || '',   // PDF 无 content，epub/txt 正常
         htmlContent: bookData.htmlContent || '',  // EPUB 富文本
-        format: bookData.format,           // 统一使用 format 字段
-        type: bookData.format,             // 兼容旧字段名 type
+        imageMap: bookData.imageMap || null,      // EPUB 图片 { relPath: dataURL }，其他格式为 null
+        format: bookData.format,           // 统一使用 format 字段（新写入）
+        type: bookData.format,             // TODO: 兼容旧字段名 type，待旧数据迁移完成后可移除
         size: bookData.size,
-        color: this.randomColor(),
-        createdAt: Date.now(),
+        color: existing ? existing.color : this.randomColor(),
+        createdAt: existing ? existing.createdAt : Date.now(),
         lastOpenedAt: Date.now(),
         scrollPosition: 0,
+        scrollRatio: 0,                    // 阅读进度比值（0~1），关闭阅读器时更新
         currentPage: 0,                    // PDF 页码记忆
-        context: '',
-        memories: []
+        context: existing ? (existing.context || '') : '',
+        memories: existing ? (existing.memories || []) : []
       };
 
       // PDF 特有字段
@@ -280,12 +377,36 @@ const App = {
       
       await Store.put('books', book);
       
-      this.showToast('导入成功');
+      this.showToast(existing ? '重新导入成功' : '导入成功');
       await this.loadShelf();
     } catch (error) {
       this.log('error', 'App', '导入失败: ' + error.message, error);
       this.showToast('导入失败: ' + error.message);
     }
+  },
+
+  // 显示重复导入确认对话框，返回 Promise<boolean>
+  _confirmDupImport(title) {
+    return new Promise(resolve => {
+      const overlay = document.getElementById('dup-import-overlay');
+      const msg = document.getElementById('dup-import-msg');
+      if (!overlay || !msg) { resolve(true); return; }
+      msg.textContent = `《${title}》已在书架中，重新导入将覆盖书籍内容，但会保留笔记与阅读进度。`;
+      overlay.classList.add('open');
+      this._dupImportResolve = resolve;
+    });
+  },
+
+  _dupImportConfirm() {
+    const overlay = document.getElementById('dup-import-overlay');
+    if (overlay) overlay.classList.remove('open');
+    if (this._dupImportResolve) { this._dupImportResolve(true); this._dupImportResolve = null; }
+  },
+
+  _dupImportCancel() {
+    const overlay = document.getElementById('dup-import-overlay');
+    if (overlay) overlay.classList.remove('open');
+    if (this._dupImportResolve) { this._dupImportResolve(false); this._dupImportResolve = null; }
   },
 
   // 切换 Tab
@@ -296,13 +417,13 @@ const App = {
     document.querySelectorAll('.tab-item').forEach(item => {
       item.classList.remove('active');
     });
-    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+    document.querySelector(`[data-tab="${tabName}"]`)?.classList.add('active');
     
     // 更新视图
     document.querySelectorAll('.view-page').forEach(page => {
       page.classList.remove('active');
     });
-    document.getElementById(`view-${tabName}`).classList.add('active');
+    document.getElementById(`view-${tabName}`)?.classList.add('active');
     
     // 特殊处理
     if (tabName === 'notes') {
@@ -335,7 +456,7 @@ const App = {
     document.querySelectorAll('.sort-btn').forEach(btn => {
       btn.classList.remove('active');
     });
-    document.querySelector(`[data-sort="${sortType}"]`).classList.add('active');
+    document.querySelector(`[data-sort="${sortType}"]`)?.classList.add('active');
     
     this.renderShelf();
   },

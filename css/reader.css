@@ -47,39 +47,46 @@
   opacity: 0.6;
 }
 
-/* 书名 */
+/* 书名 - 绝对居中，不受两侧按钮宽度影响 */
 #reader-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 160px); /* 两侧各留 80px 给按钮 */
   font-family: var(--font-title);
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--ink);
-  flex: 1;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 0 12px;
+  pointer-events: none;
 }
 
 /* 右侧操作按钮组 */
 #reader-actions {
   display: flex;
-  gap: 16px;
+  gap: 4px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .reader-action-btn {
-  font-size: 0.75rem;
-  font-weight: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  font-size: 0.9rem;
   color: var(--ink-mid);
   cursor: pointer;
-  letter-spacing: 0.04em;
   border: none;
   background: none;
-  font-family: var(--font-ui);
   transition: color 0.2s;
   padding: 0;
   -webkit-tap-highlight-color: transparent;
+  border-radius: 6px;
 }
 
 .reader-action-btn:hover {
@@ -129,6 +136,21 @@
 /* 对话段落不缩进（以引号开头） */
 #reader-content.txt-content p.dialogue {
   text-indent: 0;
+}
+
+/* 强制首行缩进模式（「字」面板开关控制） */
+/* 覆盖 EPUB 原有样式，强制所有段落首行缩进 2em */
+#reader-content.force-indent p {
+  text-indent: 2em !important;
+}
+/* 标题、对话段落、blockquote 不缩进 */
+#reader-content.force-indent h1,
+#reader-content.force-indent h2,
+#reader-content.force-indent h3,
+#reader-content.force-indent h4,
+#reader-content.force-indent blockquote,
+#reader-content.force-indent li {
+  text-indent: 0 !important;
 }
 
 /* 章节标题样式增强 */
@@ -261,18 +283,83 @@
   color: var(--ink);
 }
 
-/* ─── 目录面板 ─── */
-#toc-panel {
+/* ─── 底栏（常驻，目录 / 页码 / 字面板） ─── */
+#reader-bottom-bar {
+  height: calc(48px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--bg);
+  border-top: 1px solid var(--rule);
+  flex-shrink: 0;
+  z-index: 2050;
+}
+
+.bottom-bar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  font-size: 1rem;
+  color: var(--ink-mid);
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bottom-bar-btn:hover {
+  color: var(--ink);
+}
+
+/* 页码区（分页模式下显示，滚动模式下隐藏） */
+#page-indicator-inner {
+  display: none;
+  align-items: center;
+  gap: 12px;
+}
+
+#page-indicator-inner.active {
+  display: flex;
+}
+
+/* ─── 目录面板（左侧拉出） ─── */
+#toc-backdrop {
   position: fixed;
   inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 2190;
+  display: none;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+#toc-backdrop.active {
+  display: block;
+  opacity: 1;
+}
+
+#toc-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(80vw, 320px);
   background: var(--bg);
   z-index: 2200;
-  display: none;
+  display: flex;
   flex-direction: column;
+  transform: translateX(-100%);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 #toc-panel.active {
-  display: flex;
+  transform: translateX(0);
 }
 
 #toc-header {
@@ -387,6 +474,7 @@
 
 .typo-group {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0;
   margin-bottom: 6px;
@@ -405,6 +493,7 @@
   display: flex;
   gap: 0;
   flex: 1;
+  align-items: center;
 }
 
 .typo-btn {
@@ -435,6 +524,33 @@
   gap: 10px;
   margin-bottom: 4px;
   padding-left: 48px;
+}
+
+/* 内嵌折叠滑块行（在 typo-group 内部，占满整行） */
+.typo-inline-slider {
+  display: none;
+  flex-basis: 100%;
+  padding-left: 48px;
+  padding-top: 6px;
+  padding-bottom: 2px;
+  margin-bottom: 0;
+}
+
+.typo-inline-slider.expanded {
+  display: flex;
+}
+
+/* 自定义按钮 */
+.typo-custom-btn {
+  flex: none !important;
+  padding: 6px 10px !important;
+  color: var(--ink-ghost) !important;
+  font-size: 0.72rem !important;
+}
+
+.typo-custom-btn.active {
+  color: var(--ink) !important;
+  font-weight: 400 !important;
 }
 
 .typo-slider {
@@ -705,25 +821,35 @@
   column-rule: 1px solid var(--rule);
 }
 
-/* 底部页码指示栏 */
-#page-indicator {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: calc(40px + env(safe-area-inset-bottom));
-  display: none;
-  align-items: center;
-  justify-content: center;
-  gap: 24px;
-  background: var(--bg);
-  border-top: 1px solid var(--rule);
-  z-index: 2050;
-  padding-bottom: env(safe-area-inset-bottom);
+/* ── 分页模式：正文两端对齐 ── */
+/* 仅对段落文字生效，标题保持居中/左对齐 */
+#reader-content.paginated .page-columns p {
+  text-align: justify;
+  text-align-last: left;       /* 最后一行左对齐，避免孤行撑满 */
+  word-break: break-word;      /* 超长单词允许断行 */
+  overflow-wrap: break-word;
+  hyphens: auto;               /* 自动连字符断词（中文无效，英文有效） */
 }
 
-#page-indicator.active {
-  display: flex;
+/* ── 分页模式：EPUB 章节分隔线处强制换页 ── */
+/* parser.js 在每个 spine 章节文件之间插入 <hr class="chapter-break">，
+   分页模式下在此处强制换列（换页），实现章节级分页。
+   hr 本身隐藏，不占用新页空间。 */
+#reader-content.paginated .page-columns hr.chapter-break {
+  break-after: column;
+  -webkit-column-break-after: always; /* Safari 兼容 */
+  visibility: hidden;   /* 隐藏分割线本身，仅保留换页语义 */
+  margin: 0;
+  height: 0;
+  border: none;
+}
+
+/* ── 分页模式：标题不在列末孤立 ── */
+#reader-content.paginated .page-columns h1,
+#reader-content.paginated .page-columns h2,
+#reader-content.paginated .page-columns h3 {
+  break-after: avoid;
+  -webkit-column-break-after: avoid;
 }
 
 .page-nav-btn {
@@ -757,11 +883,11 @@
   text-align: center;
 }
 
-/* 翻页触摸区域 */
+/* 翻页触摸区域（#reader-content 是 flex 子项，bottom:0 即内容区底部） */
 .page-tap-zone {
   position: absolute;
-  top: 48px;
-  bottom: calc(40px + env(safe-area-inset-bottom));
+  top: 0;
+  bottom: 0;
   z-index: 2040;
   cursor: pointer;
 }
@@ -806,6 +932,13 @@
   padding-top: 0;
 }
 
+/* img + text layer 的共同包装层，position:relative 确保 text layer 相对于 img 定位 */
+.pdf-page-inner {
+  position: relative;
+  display: inline-block; /* 宽度收缩到 img 实际宽度，而非撑满父容器 */
+  line-height: 0; /* 消除 img 底部的 inline 间隙 */
+}
+
 /* 页面图片：自适应宽度，保持原始比例 */
 .pdf-page img {
   width: 100%;
@@ -834,10 +967,12 @@
   top: 0;
   left: 0;
   overflow: hidden;
-  opacity: 0;
   line-height: 1;
+  color: transparent;
   user-select: text;
   -webkit-user-select: text;
+  cursor: text;
+  pointer-events: auto;
 }
 
 .pdf-text-layer span {
@@ -845,6 +980,8 @@
   white-space: pre;
   transform-origin: 0% 0%;
   cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* 选中高亮 */
@@ -865,6 +1002,11 @@
   width: 100%;
   height: 100%;
   align-items: center;
+}
+
+/* 分页模式下 pdf-page-inner 保持 inline-block，由父级 flex 居中 */
+#reader-content.pdf-paginated .pdf-page-inner {
+  display: inline-block;
 }
 
 #reader-content.pdf-paginated .pdf-page img {
@@ -890,4 +1032,45 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+/* ─── EPUB 插图 ─── */
+#reader-content.epub-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.8em auto;
+}
+
+/* 行内数学公式图片（hangz-illustrations 类）：保持行内，限制高度 */
+#reader-content.epub-content img.hangz-illustrations {
+  display: inline-block;
+  height: 1.4em;          /* 与正文行高匹配 */
+  width: auto;
+  max-width: none;
+  vertical-align: middle;
+  margin: 0 0.1em;
+}
+
+/* 分页模式：限制普通插图高度，避免单张图片撑满整页 */
+#reader-content.epub-content.paginated img:not(.hangz-illustrations) {
+  max-height: 60vh;
+  object-fit: contain;
+}
+
+/* ─── EPUB 文内锚点链接 ─── */
+#reader-content a[data-anchor] {
+  color: var(--ink-faint);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s, opacity 0.15s;
+}
+
+#reader-content a[data-anchor]:hover,
+#reader-content a[data-anchor]:active {
+  color: var(--ink);
+  opacity: 0.7;
 }

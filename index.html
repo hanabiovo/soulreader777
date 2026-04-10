@@ -192,6 +192,32 @@
                         </div>
                     </div>
                     <div id="color-scheme-list" class="sp-chip-row"></div>
+
+                    <!-- 封面风格 -->
+                    <div class="sp-section-label">封面风格</div>
+                    <div class="sp-rows" id="cover-style-options">
+                        <div class="sp-row">
+                            <div class="sp-row-info">
+                                <div class="sp-row-label">居中素白</div>
+                                <div class="sp-row-sub">书名居中，底部进度线</div>
+                            </div>
+                            <button class="sp-action-btn cover-style-btn" data-style="a" onclick="setCoverStyle('a')">选用</button>
+                        </div>
+                        <div class="sp-row">
+                            <div class="sp-row-info">
+                                <div class="sp-row-label">书脊线</div>
+                                <div class="sp-row-sub">左侧竖线，百分比进度</div>
+                            </div>
+                            <button class="sp-action-btn cover-style-btn" data-style="b" onclick="setCoverStyle('b')">选用</button>
+                        </div>
+                        <div class="sp-row">
+                            <div class="sp-row-info">
+                                <div class="sp-row-label">底栏分割</div>
+                                <div class="sp-row-sub">书名占主体，底栏含作者与进度</div>
+                            </div>
+                            <button class="sp-action-btn cover-style-btn" data-style="c" onclick="setCoverStyle('c')">选用</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- 数据 tab -->
@@ -238,19 +264,23 @@
             </span>
             <span id="reader-title"></span>
             <div id="reader-actions">
-                <button class="reader-action-btn" onclick="Reader.showTypography()">字</button>
-                <button class="reader-action-btn" onclick="Reader.showTOC()">目录</button>
-                <button class="reader-action-btn" onclick="Reader.showMemoryPanel()">记忆</button>
+                <button class="reader-action-btn" onclick="Reader.showMemoryPanel()" title="记忆"><i class="fa-solid fa-infinity"></i></button>
+                <button class="reader-action-btn" id="reader-notes-btn" onclick="" title="笔记"><i class="fa-solid fa-paper-plane"></i></button>
             </div>
             <div id="reader-progress">
                 <div id="reader-progress-bar"></div>
             </div>
         </div>
         <div id="reader-content"></div>
-        <div id="page-indicator">
-            <button class="page-nav-btn" id="page-prev" onclick="Reader.prevPage()">‹ 上一页</button>
-            <span id="page-num">1 / 1</span>
-            <button class="page-nav-btn" id="page-next" onclick="Reader.nextPage()">下一页 ›</button>
+        <!-- 底栏：目录 / 页码 / 字面板 -->
+        <div id="reader-bottom-bar">
+            <button class="bottom-bar-btn" id="btn-toc" onclick="Reader.showTOC()" title="目录"><i class="fa-solid fa-stairs"></i></button>
+            <div id="page-indicator-inner">
+                <button class="page-nav-btn" id="page-prev" onclick="Reader.prevPage()">‹</button>
+                <span id="page-num">1 / 1</span>
+                <button class="page-nav-btn" id="page-next" onclick="Reader.nextPage()">›</button>
+            </div>
+            <button class="bottom-bar-btn" id="btn-typo" onclick="Reader.showTypography()" title="字面板"><i class="fa-solid fa-water"></i></button>
         </div>
     </div>
 
@@ -267,49 +297,61 @@
         <div id="typography-scroll">
 
             <!-- 字号 -->
-            <div class="typo-group">
+            <div class="typo-group" id="typo-size-group">
                 <div class="typo-label">字号</div>
                 <div class="typo-options">
                     <button class="typo-btn" data-param="size" data-value="16px" onclick="Reader.setTypoParam('size','16px',this)">小</button>
                     <button class="typo-btn active" data-param="size" data-value="19px" onclick="Reader.setTypoParam('size','19px',this)">标准</button>
                     <button class="typo-btn" data-param="size" data-value="22px" onclick="Reader.setTypoParam('size','22px',this)">大</button>
                     <button class="typo-btn" data-param="size" data-value="26px" onclick="Reader.setTypoParam('size','26px',this)">特大</button>
+                    <button class="typo-btn typo-custom-btn" data-param="size" data-value="custom" onclick="Reader.toggleCustomSlider('size')">自定义</button>
                 </div>
-            </div>
-            <div class="typo-slider-row">
-                <input type="range" id="slider-size" class="typo-slider" min="14" max="32" step="1" value="19"
-                    oninput="Reader.setTypoParam('size',this.value+'px',null);Reader.syncSliderLabel('size-val',this.value+'px')">
-                <span class="typo-slider-val" id="size-val">19px</span>
+                <div class="typo-slider-row typo-inline-slider" id="slider-row-size">
+                    <input type="range" id="slider-size" class="typo-slider" min="14" max="32" step="1" value="19"
+                        oninput="Reader.setTypoParam('size',this.value+'px',null);Reader.syncSliderLabel('size-val',this.value+'px')">
+                    <span class="typo-slider-val" id="size-val">19px</span>
+                </div>
             </div>
 
             <!-- 行高 -->
-            <div class="typo-group" style="margin-top:10px;">
+            <div class="typo-group" id="typo-line-group" style="margin-top:10px;">
                 <div class="typo-label">行高</div>
                 <div class="typo-options">
                     <button class="typo-btn" data-param="line" data-value="1.6" onclick="Reader.setTypoParam('line','1.6',this)">紧</button>
                     <button class="typo-btn active" data-param="line" data-value="1.85" onclick="Reader.setTypoParam('line','1.85',this)">标准</button>
                     <button class="typo-btn" data-param="line" data-value="2.2" onclick="Reader.setTypoParam('line','2.2',this)">舒展</button>
+                    <button class="typo-btn typo-custom-btn" data-param="line" data-value="custom" onclick="Reader.toggleCustomSlider('line')">自定义</button>
                 </div>
-            </div>
-            <div class="typo-slider-row">
-                <input type="range" id="slider-line" class="typo-slider" min="1.4" max="2.5" step="0.05" value="1.85"
-                    oninput="Reader.setTypoParam('line',this.value,null);Reader.syncSliderLabel('line-val',this.value)">
-                <span class="typo-slider-val" id="line-val">1.85</span>
+                <div class="typo-slider-row typo-inline-slider" id="slider-row-line">
+                    <input type="range" id="slider-line" class="typo-slider" min="1.4" max="2.5" step="0.05" value="1.85"
+                        oninput="Reader.setTypoParam('line',this.value,null);Reader.syncSliderLabel('line-val',this.value)">
+                    <span class="typo-slider-val" id="line-val">1.85</span>
+                </div>
             </div>
 
             <!-- 页边距 -->
-            <div class="typo-group" style="margin-top:10px;">
+            <div class="typo-group" id="typo-padding-group" style="margin-top:10px;">
                 <div class="typo-label">页边距</div>
                 <div class="typo-options">
                     <button class="typo-btn" data-param="padding" data-value="16px" onclick="Reader.setTypoParam('padding','16px',this)">窄</button>
                     <button class="typo-btn active" data-param="padding" data-value="24px" onclick="Reader.setTypoParam('padding','24px',this)">标准</button>
                     <button class="typo-btn" data-param="padding" data-value="40px" onclick="Reader.setTypoParam('padding','40px',this)">宽</button>
+                    <button class="typo-btn typo-custom-btn" data-param="padding" data-value="custom" onclick="Reader.toggleCustomSlider('padding')">自定义</button>
+                </div>
+                <div class="typo-slider-row typo-inline-slider" id="slider-row-padding">
+                    <input type="range" id="slider-padding" class="typo-slider" min="8" max="120" step="2" value="24"
+                        oninput="Reader.setTypoParam('padding',this.value+'px',null);Reader.syncSliderLabel('padding-val',this.value+'px')">
+                    <span class="typo-slider-val" id="padding-val">24px</span>
                 </div>
             </div>
-            <div class="typo-slider-row">
-                <input type="range" id="slider-padding" class="typo-slider" min="12" max="60" step="2" value="24"
-                    oninput="Reader.setTypoParam('padding',this.value+'px',null);Reader.syncSliderLabel('padding-val',this.value+'px')">
-                <span class="typo-slider-val" id="padding-val">24px</span>
+
+            <!-- 首行缩进 -->
+            <div class="typo-group" id="typo-indent-group" style="margin-top:10px;">
+                <div class="typo-label">缩进</div>
+                <div class="typo-options">
+                    <button class="typo-btn active" data-param="indent" data-value="off" onclick="Reader.toggleIndent(false)">关</button>
+                    <button class="typo-btn" data-param="indent" data-value="on" onclick="Reader.toggleIndent(true)">首行缩进</button>
+                </div>
             </div>
 
             <!-- 阅读模式 -->
@@ -346,23 +388,9 @@
                 <span class="typo-empty-tip">请先在设置页导入字体</span>
             </div>
 
-            <!-- 阅读配色 -->
+            <!-- 阅读配色（由 JS 动态渲染，与全局配色库同步） -->
             <div class="typo-section-label">阅读配色</div>
-            <div class="typo-chip-row" id="typo-color-chips">
-                <div class="typo-color-chip active" data-bg="#f7f5f0" data-ink="#1a1a18"
-                    style="background:#f7f5f0;border-color:#ccc;"
-                    onclick="Reader.setReadColor('#f7f5f0','#1a1a18',this)" title="纸白"></div>
-                <div class="typo-color-chip" data-bg="#e8f0e8" data-ink="#1a2a1a"
-                    style="background:#e8f0e8;"
-                    onclick="Reader.setReadColor('#e8f0e8','#1a2a1a',this)" title="护眼绿"></div>
-                <div class="typo-color-chip" data-bg="#2a1f16" data-ink="#c8b89a"
-                    style="background:#2a1f16;"
-                    onclick="Reader.setReadColor('#2a1f16','#c8b89a',this)" title="夜间棕"></div>
-                <div class="typo-color-chip" data-bg="#000000" data-ink="#e0e0e0"
-                    style="background:#000000;"
-                    onclick="Reader.setReadColor('#000000','#e0e0e0',this)" title="纯黑"></div>
-            </div>
-            <div id="typo-user-color-chips" class="typo-chip-row"></div>
+            <div class="typo-chip-row" id="typo-color-chips"></div>
 
         </div><!-- end #typography-scroll -->
     </div>
@@ -387,11 +415,14 @@
     </div>
     <div id="memory-panel-backdrop" onclick="Reader.closeMemoryPanel()"></div>
 
-    <!-- 目录面板 -->
+    <!-- 目录面板遮罩 -->
+    <div id="toc-backdrop" onclick="document.getElementById('toc-panel').classList.remove('active');this.classList.remove('active')"></div>
+
+    <!-- 目录面板（左侧拉出） -->
     <div id="toc-panel">
         <div id="toc-header">
             <span id="toc-title">目录</span>
-            <span id="toc-close" onclick="document.getElementById('toc-panel').classList.remove('active')">× 关闭</span>
+            <span id="toc-close" onclick="document.getElementById('toc-panel').classList.remove('active');document.getElementById('toc-backdrop').classList.remove('active')">× 关闭</span>
         </div>
         <div id="toc-list"></div>
     </div>
@@ -447,6 +478,18 @@
             <div class="font-scheme-name-btns">
                 <button onclick="Settings.closeSaveFontScheme()">取消</button>
                 <button onclick="Settings.confirmSaveFontScheme()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 重复导入确认弹窗 -->
+    <div id="dup-import-overlay">
+        <div class="dup-import-popup">
+            <div class="dup-import-title">书架中已有此书</div>
+            <div class="dup-import-msg" id="dup-import-msg"></div>
+            <div class="dup-import-btns">
+                <button onclick="App._dupImportCancel()">取消</button>
+                <button class="dup-import-confirm-btn" onclick="App._dupImportConfirm()">重新导入</button>
             </div>
         </div>
     </div>

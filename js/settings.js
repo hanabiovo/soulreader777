@@ -140,6 +140,8 @@ const Settings = {
     (fontSettings.customFonts || []).forEach(f => { if (f.url) loadFontUrl(f.url); });
     applyFontSettings();
     this.renderFontSettings();
+    // 封面风格初始化，默认方案 C
+    this.loadCoverStyle();
   },
 
   // ─── 打开/关闭（兼容旧调用） ───
@@ -171,6 +173,8 @@ const Settings = {
     localStorage.setItem('theme', mode);
     this._applyTheme();
     this.syncThemeButtons();
+    // 明暗模式切换时，清除阅读器配色 override（软性联动）
+    if (typeof Reader !== 'undefined') Reader.clearReadColorOverride();
   },
 
   // 兼容旧调用（toggle light/dark）
@@ -189,6 +193,8 @@ const Settings = {
       this._mql = window.matchMedia('(prefers-color-scheme: dark)');
       this._mqlHandler = (e) => {
         document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+        // 系统明暗切换时，清除阅读器配色 override（软性联动）
+        if (typeof Reader !== 'undefined') Reader.clearReadColorOverride();
       };
       this._mql.addEventListener('change', this._mqlHandler);
       document.documentElement.setAttribute('data-theme', this._mql.matches ? 'dark' : 'light');
@@ -607,6 +613,8 @@ const Settings = {
     if (vars.inkGhost) root.style.setProperty('--ink-ghost', vars.inkGhost);
     else               root.style.removeProperty('--ink-ghost');
     App.showToast('配色已应用');
+    // 软性联动：全局配色变更时清除阅读器的配色 override，使阅读器跟随全局
+    if (typeof Reader !== 'undefined') Reader.clearReadColorOverride();
   },
 
   randomColorScheme() {
@@ -650,7 +658,8 @@ const Settings = {
     schemes.push({ name, bg, ink, inkMid, inkFaint, inkGhost, rule, active: false });
     this._saveColorSchemes(schemes);
     this.renderColorSchemeList();
-    Reader.renderTypoColorChips();
+    // 防御判断：阅读器排版面板可能未打开，Reader 对象始终存在但需保持与其他地方一致的写法
+    if (typeof Reader !== 'undefined') Reader.renderTypoColorChips();
     App.showToast(`配色「${name}」已保存`);
   },
 
@@ -691,7 +700,7 @@ const Settings = {
     this._saveColorSchemes(userSchemes);
     this.applyColorPreset(COLOR_PRESETS[index]);
     this.renderColorSchemeList();
-    Reader.renderTypoColorChips();
+    if (typeof Reader !== 'undefined') Reader.renderTypoColorChips();
   },
 
   _activateColorScheme(index) {
@@ -712,7 +721,7 @@ const Settings = {
     };
     this.applyColorPreset(vars);
     this.renderColorSchemeList();
-    Reader.renderTypoColorChips();
+    if (typeof Reader !== 'undefined') Reader.renderTypoColorChips();
   },
 
   _deleteColorScheme(index) {
@@ -720,7 +729,7 @@ const Settings = {
     schemes.splice(index, 1);
     this._saveColorSchemes(schemes);
     this.renderColorSchemeList();
-    Reader.renderTypoColorChips();
+    if (typeof Reader !== 'undefined') Reader.renderTypoColorChips();
   },
 
   // ─── 数据导出 ───
@@ -753,6 +762,23 @@ const Settings = {
     App.showToast('已导出');
   },
 
+  // ─── 封面风格 ───
+  loadCoverStyle() {
+    const style = localStorage.getItem('sr_cover_style') || 'c';
+    document.documentElement.dataset.coverStyle = style;
+    this._coverStyle = style;
+    this.renderCoverStyleUI();
+  },
+
+  renderCoverStyleUI() {
+    const container = document.getElementById('cover-style-options');
+    if (!container) return;
+    ['a', 'b', 'c'].forEach(s => {
+      const el = container.querySelector(`[data-style="${s}"]`);
+      if (el) el.classList.toggle('active', this._coverStyle === s);
+    });
+  },
+
   // ─── 数据导入 ───
   async importData(file) {
     if (!file) return;
@@ -760,13 +786,32 @@ const Settings = {
       const text = await file.text();
       const data = JSON.parse(text);
 
+      // 基本结构校验：防止损坏的 JSON 写入数据库
+      if (typeof data !== 'object' || data === null) {
+        throw new Error('文件格式无效');
+      }
+
       if (data.books) {
+        if (!Array.isArray(data.books)) throw new Error('books 字段格式错误');
         for (const book of data.books) {
+          // 必要字段校验：id 和 title 缺一不可
+          if (!book || typeof book !== 'object') continue;
+          if (!book.id || !book.title) {
+            App.log('warn', 'Settings', `跳过无效书籍记录（缺少 id 或 title）`);
+            continue;
+          }
           await Store.put('books', book);
         }
       }
       if (data.notes) {
+        if (!Array.isArray(data.notes)) throw new Error('notes 字段格式错误');
         for (const note of data.notes) {
+          // 必要字段校验：id 和 bookId 缺一不可
+          if (!note || typeof note !== 'object') continue;
+          if (!note.id || !note.bookId) {
+            App.log('warn', 'Settings', `跳过无效笔记记录（缺少 id 或 bookId）`);
+            continue;
+          }
           await Store.put('notes', note);
         }
       }
@@ -778,3 +823,12 @@ const Settings = {
     }
   }
 };
+
+// 全局封面风格切换函数（供 HTML onclick 调用）
+function setCoverStyle(style) {
+  localStorage.setItem('sr_cover_style', style);
+  document.documentElement.dataset.coverStyle = style;
+  Settings._coverStyle = style;
+  Settings.renderCoverStyleUI();
+  App.renderShelf(); // 切换后立即重新渲染书架，无需刷新页面
+}

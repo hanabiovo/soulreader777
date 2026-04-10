@@ -748,3 +748,10 @@
 .sp-color-chip:hover .chip-del {
   opacity: 1;
 }
+
+/* ─── 封面风格按钮激活态 ─── */
+.cover-style-btn.active {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 400;
+}
