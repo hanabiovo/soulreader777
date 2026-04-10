@@ -113,7 +113,8 @@
   font-size: var(--read-size);
   line-height: var(--read-line);
   letter-spacing: var(--read-tracking);
-  color: var(--ink);
+  background: var(--read-bg, var(--bg));
+  color: var(--read-ink, var(--ink));
 }
 
 #reader-content p {
@@ -710,7 +711,7 @@
   bottom: 0;
   left: 0;
   right: 0;
-  height: 40px;
+  height: calc(40px + env(safe-area-inset-bottom));
   display: none;
   align-items: center;
   justify-content: center;
@@ -760,7 +761,7 @@
 .page-tap-zone {
   position: absolute;
   top: 48px;
-  bottom: 40px;
+  bottom: calc(40px + env(safe-area-inset-bottom));
   z-index: 2040;
   cursor: pointer;
 }
@@ -825,6 +826,30 @@
 /* PDF 反色模式（暗色阅读） */
 #reader-content.pdf-inverted .pdf-page img {
   filter: invert(1) hue-rotate(180deg);
+}
+
+/* PDF text layer — 透明但可选中（支持划词） */
+.pdf-text-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  opacity: 0;
+  line-height: 1;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pdf-text-layer span {
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0% 0%;
+  cursor: text;
+}
+
+/* 选中高亮 */
+.pdf-text-layer ::selection {
+  background: rgba(211, 84, 0, 0.3);
 }
 
 /* PDF 分页模式：隐藏滚动，单页居中 */

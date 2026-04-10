@@ -277,7 +277,7 @@
                 </div>
             </div>
             <div class="typo-slider-row">
-                <input type="range" class="typo-slider" min="14" max="32" step="1" value="19"
+                <input type="range" id="slider-size" class="typo-slider" min="14" max="32" step="1" value="19"
                     oninput="Reader.setTypoParam('size',this.value+'px',null);Reader.syncSliderLabel('size-val',this.value+'px')">
                 <span class="typo-slider-val" id="size-val">19px</span>
             </div>
@@ -292,7 +292,7 @@
                 </div>
             </div>
             <div class="typo-slider-row">
-                <input type="range" class="typo-slider" min="1.4" max="2.5" step="0.05" value="1.85"
+                <input type="range" id="slider-line" class="typo-slider" min="1.4" max="2.5" step="0.05" value="1.85"
                     oninput="Reader.setTypoParam('line',this.value,null);Reader.syncSliderLabel('line-val',this.value)">
                 <span class="typo-slider-val" id="line-val">1.85</span>
             </div>
@@ -307,7 +307,7 @@
                 </div>
             </div>
             <div class="typo-slider-row">
-                <input type="range" class="typo-slider" min="12" max="60" step="2" value="24"
+                <input type="range" id="slider-padding" class="typo-slider" min="12" max="60" step="2" value="24"
                     oninput="Reader.setTypoParam('padding',this.value+'px',null);Reader.syncSliderLabel('padding-val',this.value+'px')">
                 <span class="typo-slider-val" id="padding-val">24px</span>
             </div>

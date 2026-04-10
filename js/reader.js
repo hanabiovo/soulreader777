@@ -19,6 +19,7 @@ const Reader = {
   _pdfTotalPages: 0,
   _pdfPageTextCache: '',
   _pdfDarkMode: 'auto', // 'light' | 'dark' | 'auto'
+  _pdfDoc: null, // 缓存 pdfjsLib 文档对象，避免每次翻页重新解析
 
   // ─── 打开阅读器 ───
   async open(bookId) {
@@ -150,11 +151,13 @@ const Reader = {
     document.getElementById('selection-dock').classList.remove('active');
     this.closeAIChat();
     this.closeMemoryPanel();
+    this.closeTypography();
     document.getElementById('toc-panel').classList.remove('active');
     
     this.currentBook = null;
     this.currentNoteId = null;
     this._isPdf = false;
+    this._pdfDoc = null;
   },
 
   // ─── 更新进度条 ───
@@ -205,7 +208,8 @@ const Reader = {
       if (this._tocPatterns.some(re => re.test(trimmed))) {
         return `<h2 class="chapter-title">${escaped}</h2>`;
       }
-      return `<p>${escaped}</p>`;
+      const isDialogue = /^["'"'「『【]/.test(trimmed);
+      return `<p${isDialogue ? ' class="dialogue"' : ''}>${escaped}</p>`;
     }).join('');
     
     container.innerHTML = html;
@@ -219,10 +223,63 @@ const Reader = {
 
     // 生成所有页面的 <img>，每页一张
     container.innerHTML = pdfPages.map((dataUrl, i) =>
-      `<div class="pdf-page" data-page="${i}">` +
+      `<div class="pdf-page" data-page="${i}" style="position:relative;">` +
         `<img src="${dataUrl}" alt="第 ${i + 1} 页" draggable="false">` +
       `</div>`
     ).join('');
+  },
+
+  // ─── PDF：缓存文档对象 ───
+  async _getPdfDoc() {
+    if (this._pdfDoc) return this._pdfDoc;
+    if (!this.currentBook?.pdfData) return null;
+    this._pdfDoc = await pdfjsLib.getDocument({ data: this.currentBook.pdfData.slice(0) }).promise;
+    return this._pdfDoc;
+  },
+
+  // ─── PDF：渲染 text layer（透明文字层，支持划词） ───
+  async _renderPdfTextLayer(pageIndex) {
+    if (!this.currentBook?.pdfData) return;
+
+    const pageEl = document.querySelector(`.pdf-page[data-page="${pageIndex}"]`);
+    if (!pageEl || pageEl.querySelector('.pdf-text-layer')) return; // 避免重复渲染
+
+    const pdf = await this._getPdfDoc();
+    if (!pdf) return;
+    const page = await pdf.getPage(pageIndex + 1); // pdfjs 页码从 1 开始
+    const scale = this.currentBook.pdfScale || 2.0;
+    const viewport = page.getViewport({ scale });
+
+    // 创建 text layer 容器
+    const textLayerDiv = document.createElement('div');
+    textLayerDiv.className = 'pdf-text-layer';
+    textLayerDiv.style.width = viewport.width + 'px';
+    textLayerDiv.style.height = viewport.height + 'px';
+    pageEl.appendChild(textLayerDiv);
+
+    const textContent = await page.getTextContent();
+
+    // 用 pdfjs 的 TextLayer 渲染器
+    pdfjsLib.renderTextLayer({
+      textContentSource: textContent,
+      container: textLayerDiv,
+      viewport: viewport,
+      textDivs: []
+    });
+
+    // 等 img 加载完成后计算缩放比，对齐 text layer 与可见图片
+    const img = pageEl.querySelector('img');
+    const applyScale = () => {
+      if (!img.clientWidth) return;
+      const displayScale = img.clientWidth / viewport.width;
+      textLayerDiv.style.transform = `scale(${displayScale})`;
+      textLayerDiv.style.transformOrigin = '0 0';
+    };
+    if (img.complete) {
+      applyScale();
+    } else {
+      img.addEventListener('load', applyScale, { once: true });
+    }
   },
 
   // ─── PDF：显示指定页（滚动到对应位置 或 分页模式切换） ───
@@ -238,15 +295,24 @@ const Reader = {
         pages.forEach((p, i) => {
           p.style.display = (i === pageIndex || i === pageIndex + 1) ? '' : 'none';
         });
+        // 渲染当前可见页的 text layer
+        this._renderPdfTextLayer(pageIndex);
+        if (pageIndex + 1 < pages.length) this._renderPdfTextLayer(pageIndex + 1);
       } else {
         // 单页模式：隐藏所有页，只显示目标页
         pages.forEach((p, i) => {
           p.style.display = i === pageIndex ? '' : 'none';
         });
+        // 渲染当前页的 text layer
+        this._renderPdfTextLayer(pageIndex);
       }
     } else {
       // 滚动模式：滚到目标页
       pages[pageIndex].scrollIntoView({ behavior: 'auto', block: 'start' });
+      // 渲染当前页及前后各 1 页的 text layer
+      for (let i = Math.max(0, pageIndex - 1); i <= Math.min(pages.length - 1, pageIndex + 1); i++) {
+        this._renderPdfTextLayer(i);
+      }
     }
     this._pdfCurrentPage = pageIndex;
     this._updatePdfPageIndicator();
@@ -305,6 +371,10 @@ const Reader = {
         this._pdfCurrentPage = closestPage;
         this._updatePdfPageIndicator();
         this._updatePdfProgress();
+        // 滚动时渲染当前页及前后页的 text layer
+        for (let i = Math.max(0, closestPage - 1); i <= Math.min(pages.length - 1, closestPage + 1); i++) {
+          this._renderPdfTextLayer(i);
+        }
       }
     };
     container.addEventListener('scroll', this._pdfScrollHandler, { passive: true });
@@ -599,8 +669,14 @@ const Reader = {
     if (!this.currentBook) return;
 
     const btn = document.getElementById('memory-auto-extract');
+    if (!btn) return;
     btn.disabled = true;
     btn.textContent = '正在分析…';
+
+    const resetBtn = () => {
+      btn.textContent = 'AI 自动提取全书背景';
+      btn.disabled = false;
+    };
 
     App.log('info', 'Reader', `autoExtractContext: 《${this.currentBook.title}》`);
 
@@ -635,21 +711,18 @@ const Reader = {
         async () => {
           this.currentBook.context = result.trim();
           await Store.put('books', this.currentBook);
-          btn.textContent = 'AI 自动提取全书背景';
-          btn.disabled = false;
+          resetBtn();
           App.log('info', 'Reader', '背景提取完成');
           App.showToast('背景分析完成');
         },
         (err) => {
-          btn.textContent = 'AI 自动提取全书背景';
-          btn.disabled = false;
+          resetBtn();
           App.log('error', 'Reader', '背景提取失败: ' + err.message, err);
           App.showToast('分析失败：' + err.message);
         }
       );
     } catch (e) {
-      btn.textContent = 'AI 自动提取全书背景';
-      btn.disabled = false;
+      resetBtn();
       App.log('error', 'Reader', '背景提取异常: ' + e.message, e);
       App.showToast('分析失败：' + e.message);
     }
@@ -664,8 +737,6 @@ const Reader = {
 
   // ─── 处理文本选择 ───
   handleSelection() {
-    // PDF canvas 模式下不支持选词
-    if (this._isPdf) return;
 
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) {
@@ -687,6 +758,7 @@ const Reader = {
     if (!this.selectedText || !this.currentBook) return;
 
     const note = {
+      id: 'n' + Date.now(),
       bookId: this.currentBook.id,
       quote: this.selectedText,
       type: type,
@@ -695,10 +767,10 @@ const Reader = {
       updatedAt: Date.now()
     };
 
-    const noteId = await Store.put('notes', note);
+    await Store.put('notes', note);
     
     // 高亮文本
-    this.highlightText(this.selectedRange, noteId);
+    this.highlightText(this.selectedRange, note.id);
     
     // 清除选择
     window.getSelection().removeAllRanges();
@@ -707,14 +779,14 @@ const Reader = {
     this.selectedRange = null;
 
     if (type === 'ai') {
-      await this.openAIChat(noteId);
+      await this.openAIChat(note.id);
       // 自动发起第一条消息
       this.sendAIMessage(`我读到了这段：\n"${note.quote}"\n\n你怎么看？`);
     } else {
       App.showToast('已存入笔记');
     }
 
-    return noteId;
+    return note.id;
   },
 
   // ─── 高亮文本 ───
@@ -940,8 +1012,9 @@ const Reader = {
   async copyMessage(index) {
     const note = await Store.get('notes', this.currentNoteId);
     if (!note || !note.messages[index]) return;
-    navigator.clipboard.writeText(note.messages[index].content);
-    App.showToast('已复制');
+    navigator.clipboard.writeText(note.messages[index].content)
+      .then(() => App.showToast('已复制'))
+      .catch(() => App.showToast('复制失败，请手动选择'));
   },
 
   // ─── 删除消息 ───
@@ -1014,15 +1087,15 @@ const Reader = {
     this._syncTypoButtons('padding', curPx);
 
     // 同步滑块
-    const sizeSlider = document.querySelector('.typo-slider[oninput*="size"]');
+    const sizeSlider = document.getElementById('slider-size');
     if (sizeSlider) sizeSlider.value = parseFloat(curSize);
     this.syncSliderLabel('size-val', curSize);
 
-    const lineSlider = document.querySelector('.typo-slider[oninput*="line"]');
+    const lineSlider = document.getElementById('slider-line');
     if (lineSlider) lineSlider.value = parseFloat(curLine);
     this.syncSliderLabel('line-val', curLine);
 
-    const padSlider = document.querySelector('.typo-slider[oninput*="padding"]');
+    const padSlider = document.getElementById('slider-padding');
     if (padSlider) padSlider.value = parseFloat(curPx);
     this.syncSliderLabel('padding-val', curPx);
 
@@ -1121,8 +1194,6 @@ const Reader = {
     if (content) {
       content.style.setProperty('--read-bg',  bg);
       content.style.setProperty('--read-ink', ink);
-      content.style.background = `var(--read-bg, ${bg})`;
-      content.style.color      = `var(--read-ink, ${ink})`;
     }
     // 更新 chip 激活状态
     document.querySelectorAll('.typo-color-chip').forEach(c => c.classList.remove('active'));

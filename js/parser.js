@@ -104,6 +104,7 @@ const Parser = {
       content: '',           // PDF 不提取文字到 content（避免乱序错字）
       pdfPages,              // dataURL 数组，供阅读界面显示
       pdfData: pdfDataCopy,  // 克隆的数据，供 AI 按需提取文字（原始 buffer 已被 pdf.js detach）
+      pdfScale: 2.0,         // 渲染缩放比，text layer 坐标对齐用
       format: 'pdf',
       size: file.size,
       chapters: pdf.numPages
