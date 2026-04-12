@@ -1492,11 +1492,11 @@ const Reader = {
         btn.classList.toggle('active', (btn.dataset.value === 'dual') === dual);
       });
     } else {
-      // EPUB/TXT：重置实际生效缓存，让 recalcPages 重新判断是否降级
+      // EPUB/TXT：重置实际生效缓存，强制 recalcPages 重新判断是否降级并同步按钮
+      // 注意：不在此处直接设置 dual-page 类，完全交由 recalcPages 决定实际生效状态
       this._dualPageEffective = undefined;
-      container.classList.toggle('dual-page', dual);
       if (this._paginationMode) {
-        // recalcPages 内部会根据屏幕尺寸决定实际生效状态并同步按钮
+        // recalcPages 内部会根据屏幕尺寸决定实际生效状态、设置 dual-page 类并同步按钮
         this.recalcPages();
       } else {
         // 非分页模式直接同步按钮
