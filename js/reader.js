@@ -1666,6 +1666,7 @@ const Reader = {
       wrapper.style.columnCount = '1';
       wrapper.style.columnWidth = Math.round(contentW) + 'px';
       wrapper.style.columnGap = pageGap + 'px';
+      // _pageWidth 先用估算值，待浏览器重排后从 scrollWidth 反推精确值
       this._pageWidth = Math.round(contentW + pageGap);
     }
 
@@ -1675,7 +1676,14 @@ const Reader = {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const sw = wrapper.scrollWidth;
-        this._totalPages = Math.max(1, Math.ceil(sw / this._pageWidth));
+        // ── 关键修复：从实际 scrollWidth 反推每页真实步进 ──
+        // 浏览器在高 DPR 设备上排版时会做亚像素对齐，导致实际列宽
+        // 与 JS 计算的 _pageWidth 存在误差，翻页越多累积偏移越大。
+        // 解决：用估算值先算出总页数，再以 scrollWidth/totalPages 为精确步进。
+        const estimatedPages = Math.max(1, Math.round(sw / this._pageWidth));
+        // 用 scrollWidth 整除总页数得到精确步进，消除亚像素累积误差
+        this._pageWidth = sw / estimatedPages;
+        this._totalPages = estimatedPages;
 
         // ── 重排后：按字符偏移恢复页码（简化版 CFI） ──
         if (anchor && anchor.charOffset != null) {
