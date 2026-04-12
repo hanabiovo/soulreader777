@@ -1484,18 +1484,24 @@ const Reader = {
       if (this._paginationMode) {
         this._showPdfPage(this._pdfCurrentPage);
       }
+      // PDF 模式直接同步按钮（无自动降级）
+      document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.value === 'dual') === dual);
+      });
     } else {
+      // EPUB/TXT：重置实际生效缓存，让 recalcPages 重新判断是否降级
+      this._dualPageEffective = undefined;
       container.classList.toggle('dual-page', dual);
-      // EPUB/TXT 分页模式下重算
       if (this._paginationMode) {
+        // recalcPages 内部会根据屏幕尺寸决定实际生效状态并同步按钮
         this.recalcPages();
+      } else {
+        // 非分页模式直接同步按钮
+        document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
+          btn.classList.toggle('active', (btn.dataset.value === 'dual') === dual);
+        });
       }
     }
-
-    // 同步按钮状态
-    document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
-      btn.classList.toggle('active', (btn.dataset.value === 'dual') === dual);
-    });
   },
 
   // 启用分页模式
@@ -1518,11 +1524,22 @@ const Reader = {
       container.removeEventListener('scroll', this._scrollHandler);
     }
 
-    // 应用双页类
+    // 应用双页类（recalcPages 会根据屏幕尺寸决定是否实际生效）
     if (this._dualPage) container.classList.add('dual-page');
 
     // 计算分页（延迟等待 DOM 稳定）
     setTimeout(() => this.recalcPages(), 80);
+
+    // 监听窗口尺寸变化和屏幕旋转，自动重算分页
+    if (!this._resizeHandler) {
+      let _resizeTimer = null;
+      this._resizeHandler = () => {
+        clearTimeout(_resizeTimer);
+        _resizeTimer = setTimeout(() => this.recalcPages(), 150);
+      };
+      window.addEventListener('resize', this._resizeHandler, { passive: true });
+      window.addEventListener('orientationchange', this._resizeHandler, { passive: true });
+    }
 
     // 显示页码指示器
     const indicator = document.getElementById('page-indicator-inner');
@@ -1540,6 +1557,15 @@ const Reader = {
     const container = document.getElementById('reader-content');
     container.classList.remove('paginated');
     container.classList.remove('dual-page');
+
+    // 移除 resize/orientationchange 监听
+    if (this._resizeHandler) {
+      window.removeEventListener('resize', this._resizeHandler);
+      window.removeEventListener('orientationchange', this._resizeHandler);
+      this._resizeHandler = null;
+    }
+    // 重置实际生效状态缓存
+    this._dualPageEffective = undefined;
 
     // 解包 page-columns，恢复 container 的水平 padding
     const wrapper = container.querySelector('.page-columns');
@@ -1635,6 +1661,23 @@ const Reader = {
     const wrapper = container.querySelector('.page-columns');
     if (!wrapper) return;
 
+    // ── 自动降级：窄屏或竖屏时强制单页 ──
+    // 阈值 600px：低于此宽度双页列太窄，阅读体验差
+    // 竖屏检测：高度 > 宽度（手机竖持）
+    const DUAL_MIN_WIDTH = 600;
+    const isNarrow = window.innerWidth < DUAL_MIN_WIDTH;
+    const isPortrait = window.innerHeight > window.innerWidth;
+    // _dualPageEffective：实际生效的双页状态（不修改用户持久化设置）
+    const dualEffective = this._dualPage && !isNarrow && !isPortrait;
+    // 若实际生效状态与上次不同，同步 container 类名和按钮
+    if (dualEffective !== this._dualPageEffective) {
+      this._dualPageEffective = dualEffective;
+      container.classList.toggle('dual-page', dualEffective);
+      document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.value === 'dual') === dualEffective);
+      });
+    }
+
     // ── 重排前：捕获当前页首行锚点 ──
     const anchor = this._captureAnchor();
 
@@ -1673,7 +1716,7 @@ const Reader = {
     let contentH = container.clientHeight - padT - padB;
     contentH = Math.max(contentH, 120);
 
-    if (this._dualPage) {
+    if (dualEffective) {
       // 双页：2 列可见，列宽 = (contentW - gap) / 2
       const colW = (contentW - pageGap) / 2;
       wrapper.style.columnCount = '2';
