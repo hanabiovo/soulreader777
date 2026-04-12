@@ -2,7 +2,7 @@
    SW.JS - Service Worker
    ═══════════════════════════════════════ */
 
-const CACHE_NAME = 'soulreader-v1';
+const CACHE_NAME = 'soulreader-v2';
 const BASE = '/soulreader777';
 const urlsToCache = [
   BASE + '/',
