@@ -821,6 +821,57 @@ const Settings = {
     } catch (e) {
       App.showToast('导入失败：' + e.message);
     }
+  },
+
+  // ─── 检查更新（清除旧版 SW 缓存，强制应用新版） ───
+  async checkUpdate() {
+    const btn = document.getElementById('update-btn');
+    const status = document.getElementById('update-status');
+
+    if (!('serviceWorker' in navigator)) {
+      if (status) status.textContent = '当前环境不支持 Service Worker';
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = '检查中…'; }
+    if (status) status.textContent = '正在检查更新…';
+
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) {
+        if (status) status.textContent = '未找到 Service Worker 注册';
+        if (btn) { btn.disabled = false; btn.textContent = '检查'; }
+        return;
+      }
+
+      // 主动触发检查
+      await reg.update();
+
+      // 判断是否有等待中的新版 SW
+      const newWorker = reg.installing || reg.waiting;
+      if (newWorker) {
+        // 有新版本：让新 SW 立即接管，然后刷新
+        if (status) status.textContent = '发现新版本，正在更新…';
+        // 监听新 SW 状态，activated 后刷新
+        const applyUpdate = () => {
+          if (newWorker.state === 'activated') {
+            window.location.reload();
+          }
+        };
+        newWorker.addEventListener('statechange', applyUpdate);
+        // 发送 skipWaiting 指令
+        newWorker.postMessage({ type: 'SKIP_WAITING' });
+        // 兜底：2s 后如未刷新则强制刷新
+        setTimeout(() => window.location.reload(), 2000);
+      } else {
+        // 当前已是最新版
+        if (status) status.textContent = '✓ 已是最新版本';
+        if (btn) { btn.disabled = false; btn.textContent = '检查'; }
+      }
+    } catch (e) {
+      if (status) status.textContent = '检查失败：' + e.message;
+      if (btn) { btn.disabled = false; btn.textContent = '检查'; }
+    }
   }
 };
 

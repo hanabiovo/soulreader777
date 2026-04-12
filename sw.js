@@ -48,6 +48,13 @@ self.addEventListener('activate', event => {
   );
 });
 
+// 监听主线程发来的 skipWaiting 指令（"检查更新"按钮触发）
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 // 拦截请求
 self.addEventListener('fetch', event => {
   // 跳过外部 CDN 请求

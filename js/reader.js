@@ -622,9 +622,10 @@ const Reader = {
     if (entry && entry.el) {
       if (this._paginationMode) {
         // 分页模式：计算元素所在页码
-        // 新方案下 container.paddingLeft 已被清零，offsetLeft 即列坐标
+        // offsetLeft 包含 container 的 paddingLeft，需减去得到列坐标
         const container = document.getElementById('reader-content');
-        const elLeft = entry.el.offsetLeft;
+        const padL = parseFloat(getComputedStyle(container).paddingLeft) || 0;
+        const elLeft = entry.el.offsetLeft - padL;
         const page = Math.floor(elLeft / this._pageWidth);
         this.goToPage(page);
       } else {
@@ -1594,10 +1595,12 @@ const Reader = {
     // 降级：第 0 页直接返回 charOffset=0
     if (this._currentPage === 0) return { charOffset: 0 };
 
-    // container.paddingLeft 保持不变（CSS 变量控制视觉边距），
-    // .page-columns 在 padding-box 内，column-gap=0，
-    // parent.offsetLeft 是元素在列布局中的水平坐标（从 wrapper 左边缘起）。
-    // _pageWidth = sw/N（精确列宽），pageStart = currentPage * _pageWidth。
+    // #reader-content 保留 padding（视觉边距），
+    // .page-columns 的 offsetParent 是 #reader-content，
+    // 因此 element.offsetLeft 包含 container 的 paddingLeft。
+    // 列坐标 = offsetLeft - padL，第 N 页列坐标起点 = N * _pageWidth。
+    const cs = getComputedStyle(container);
+    const padL = parseFloat(cs.paddingLeft) || 0;
     const pageStart = this._currentPage * this._pageWidth;
 
     // TreeWalker 遍历文本节点，累加字符偏移
@@ -1613,8 +1616,8 @@ const Reader = {
     while ((node = walker.nextNode())) {
       const parent = node.parentElement;
       if (!parent) { charOffset += node.nodeValue.length; continue; }
-      // 只对"可能在当前页"的节点读一次 offsetLeft
-      const elLeft = parent.offsetLeft;
+      // offsetLeft 减去 container 的 paddingLeft，得到列布局坐标
+      const elLeft = parent.offsetLeft - padL;
       if (elLeft >= pageStart) {
         // 找到当前页第一个文本节点，记录此时的累计偏移
         return { charOffset };
@@ -1639,52 +1642,64 @@ const Reader = {
     wrapper.style.transition = 'none';
 
     // ── 分页布局核心 ──
-    // #reader-content 保留 CSS padding（视觉左右边距）。
-    // .page-columns 在 padding-box 内，实际可用宽度 = clientWidth - padL - padR。
-    // 设置 column-gap = 0，column-width = 实际可用宽度（单页）或一半（双页）。
-    // _pageWidth 在 rAF 后从 scrollWidth 精确反推：
-    //   column-gap=0 时，scrollWidth = N * actualColW，_pageWidth = scrollWidth / N。
+    //
+    // 设计：#reader-content 保留 padding（视觉边距，用户可调）
+    //       .page-columns 在 padding-box 内，宽度 = contentW
+    //       column-width = contentW，column-gap = padL + padR
+    //       翻页步进 = contentW + gap = clientWidth（精确整数）
+    //
+    // 精确反推：column-gap > 0 时 scrollWidth = N*colW + (N-1)*gap
+    //   ⟹ scrollWidth + gap = N*(colW+gap) = N*_pageWidth
+    //   ⟹ N = round((scrollWidth+gap) / _pageWidth)
+    //   ⟹ 精确步进 = (scrollWidth+gap) / N
+    //
     const cs = getComputedStyle(container);
     const padL = parseFloat(cs.paddingLeft) || 0;
     const padR = parseFloat(cs.paddingRight) || 0;
     const padT = parseFloat(cs.paddingTop) || 0;
     const padB = parseFloat(cs.paddingBottom) || 0;
 
-    // padding-box 内可用宽度（浏览器用此宽度排列列）
+    // 清除之前可能设置的 inline style（防止多次调用叠加）
+    wrapper.style.marginLeft = '';
+    wrapper.style.marginRight = '';
+    wrapper.style.width = '';
+    wrapper.style.paddingLeft = '';
+    wrapper.style.paddingRight = '';
+    container.style.paddingLeft = '';
+    container.style.paddingRight = '';
+
     const contentW = Math.max(container.clientWidth - padL - padR, 100);
+    const pageGap = padL + padR;
     let contentH = container.clientHeight - padT - padB;
     contentH = Math.max(contentH, 120);
 
-    // 清除 wrapper 残留 inline padding
-    wrapper.style.paddingLeft = '';
-    wrapper.style.paddingRight = '';
-
     if (this._dualPage) {
-      // 双页：每屏 2 列，列宽 = contentW/2，gap = 0
+      // 双页：2 列可见，列宽 = (contentW - gap) / 2
+      const colW = (contentW - pageGap) / 2;
       wrapper.style.columnCount = '2';
-      wrapper.style.columnWidth = Math.floor(contentW / 2) + 'px';
-      wrapper.style.columnGap = '0px';
+      wrapper.style.columnWidth = Math.max(colW, 100) + 'px';
+      wrapper.style.columnGap = pageGap + 'px';
       // 预估步进（rAF 后精确反推）
-      this._pageWidth = contentW;
+      this._pageWidth = contentW + pageGap;
     } else {
-      // 单页：列宽 = contentW，gap = 0
+      // 单页：列宽 = contentW，gap = padL+padR
       wrapper.style.columnCount = '1';
       wrapper.style.columnWidth = contentW + 'px';
-      wrapper.style.columnGap = '0px';
+      wrapper.style.columnGap = pageGap + 'px';
       // 预估步进（rAF 后精确反推）
-      this._pageWidth = contentW;
+      this._pageWidth = contentW + pageGap;
     }
 
     wrapper.style.height = contentH + 'px';
 
-    // 等待浏览器重排后测量 scrollWidth，精确反推每页步进
+    // 等待浏览器重排后精确反推步进
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const sw = wrapper.scrollWidth;
-        // column-gap=0：scrollWidth = N * actualColW
-        // N = round(sw / 预估contentW)，精确步进 = sw / N
-        const N = Math.max(1, Math.round(sw / this._pageWidth));
-        this._pageWidth = sw / N;
+        const gap = pageGap;
+        // scrollWidth + gap = N * (colW + gap) = N * _pageWidth
+        const N = Math.max(1, Math.round((sw + gap) / this._pageWidth));
+        this._pageWidth = (sw + gap) / N;
         this._totalPages = N;
 
         // ── 重排后：按字符偏移恢复页码（简化版 CFI） ──
@@ -1706,9 +1721,10 @@ const Reader = {
               const len = tn.nodeValue.length;
               if (accumulated + len > anchor.charOffset) {
                 // 找到目标节点，读一次 offsetLeft 定位新页码
+                // offsetLeft 包含 container 的 paddingLeft，需减去
                 const parent = tn.parentElement;
                 if (parent) {
-                   const elLeft = parent.offsetLeft;
+                   const elLeft = parent.offsetLeft - padL;
                    const newPage = Math.floor(elLeft / this._pageWidth);
                   this._currentPage = Math.max(0, Math.min(newPage, this._totalPages - 1));
                   found = true;
@@ -1986,10 +2002,11 @@ const Reader = {
 
       if (this._paginationMode) {
         // 分页模式：找到目标元素所在页并跳转
-        // 新方案下 container.paddingLeft 已被清零，offsetLeft 即列坐标
+        // offsetLeft 包含 container 的 paddingLeft，需减去得到列坐标
         const wrapper = container.querySelector('.page-columns');
         if (!wrapper) return;
-        const elLeft = targetEl.offsetLeft;
+        const padL = parseFloat(getComputedStyle(container).paddingLeft) || 0;
+        const elLeft = targetEl.offsetLeft - padL;
         const page = Math.floor(elLeft / this._pageWidth);
         this.goToPage(Math.max(0, Math.min(page, this._totalPages - 1)));
       } else {
