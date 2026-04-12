@@ -173,9 +173,19 @@ const App = {
     }).join('');
     // 事件委托：统一在容器上监听点击
     container.querySelectorAll('.book-cover').forEach(el => {
-      el.addEventListener('click', () => {
+      el.addEventListener('click', (e) => {
+        // 点击删除按钮时不打开书籍（兼容图片封面：用 closest 向上查找）
+        if (e.target.closest('[data-del-id]')) return;
         const id = parseInt(el.dataset.bookId);
         if (id) App.openBook(id);
+      });
+    });
+    // 删除按钮事件委托（网格视图）
+    container.querySelectorAll('[data-del-id]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = parseInt(el.dataset.delId);
+        if (id) App.deleteBook(id);
       });
     });
   },
@@ -201,6 +211,21 @@ const App = {
     const author = this.escapeHtml(rawAuthor);
     // data-del-id 由外层事件委托处理，不直接注入 id 到 onclick
     const delBtn = `<div class="book-del-btn" data-del-id="${parseInt(b.id) || 0}">×</div>`;
+
+    // ── 有原书封面图时，且用户开启了"显示原书封面"，统一显示图片封面 ──
+    const showCoverImage = localStorage.getItem('sr_show_cover_image') !== 'false';
+    if (b.coverImage && showCoverImage) {
+      const pctBar = pct > 0
+        ? `<div class="cover-img-progress"><div class="cover-img-progress-fill" style="width:${pct}%"></div></div>`
+        : '';
+      return `
+        <img class="cover-img" src="${b.coverImage}" alt="${title}" draggable="false">
+        <div class="cover-img-overlay">
+          ${pctBar}
+        </div>
+        ${delBtn}
+      `;
+    }
 
     switch (style) {
       case 'a':
@@ -356,6 +381,7 @@ const App = {
         content: bookData.content || '',   // PDF 无 content，epub/txt 正常
         htmlContent: bookData.htmlContent || '',  // EPUB 富文本
         imageMap: bookData.imageMap || null,      // EPUB 图片 { relPath: dataURL }，其他格式为 null
+        coverImage: bookData.coverImage || null,  // 封面图 dataURL（EPUB/PDF 提取，TXT 为 null）
         format: bookData.format,           // 统一使用 format 字段（新写入）
         type: bookData.format,             // TODO: 兼容旧字段名 type，待旧数据迁移完成后可移除
         size: bookData.size,

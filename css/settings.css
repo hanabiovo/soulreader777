@@ -755,3 +755,34 @@
   color: var(--ink);
   font-weight: 400;
 }
+
+/* ─── 布尔开关按钮（开启/关闭两态） ─── */
+/* 基础态（关闭）：空心边框，文字暗淡 */
+.sp-bool-btn {
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  background: none;
+  border: 1px solid var(--rule);
+  padding: 4px 12px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  letter-spacing: 0.04em;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+
+/* 激活态（开启）：实心背景，文字反色 */
+.sp-bool-btn.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+  font-weight: 400;
+}
+
+.sp-bool-btn:hover:not(.active) {
+  border-color: var(--ink-faint);
+  color: var(--ink-mid);
+}

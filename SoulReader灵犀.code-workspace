@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../灵犀/附件"
+		}
+	],
+	"settings": {
+		"liveServer.settings.multiRootWorkspaceName": "SoulReader灵犀"
+	}
+}

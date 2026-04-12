@@ -218,6 +218,18 @@
                             <button class="sp-action-btn cover-style-btn" data-style="c" onclick="setCoverStyle('c')">选用</button>
                         </div>
                     </div>
+
+                    <!-- 显示原书封面 -->
+                    <div class="sp-section-label">书架封面图</div>
+                    <div class="sp-rows">
+                        <div class="sp-row">
+                            <div class="sp-row-info">
+                                <div class="sp-row-label">显示原书封面</div>
+                                <div class="sp-row-sub">有封面图时优先显示，无则回退文字风格</div>
+                            </div>
+                            <button class="sp-bool-btn" id="cover-image-toggle" onclick="Settings.toggleCoverImage()">已关闭</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- 数据 tab -->

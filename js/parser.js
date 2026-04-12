@@ -70,6 +70,30 @@ const Parser = {
       manifest[item.getAttribute('id')] = item.getAttribute('href');
     });
 
+    // ─── 提取封面图 ID（三种常见写法） ───
+    // 1. <meta name="cover" content="cover-image-id" />
+    // 2. <item properties="cover-image" .../>
+    // 3. id 含 "cover" 且为图片类型
+    let coverItemId = null;
+    const coverMeta = opfDoc.querySelector('meta[name="cover"]');
+    if (coverMeta) {
+      coverItemId = coverMeta.getAttribute('content');
+    }
+    if (!coverItemId) {
+      const coverItem = opfDoc.querySelector('item[properties~="cover-image"]');
+      if (coverItem) coverItemId = coverItem.getAttribute('id');
+    }
+    if (!coverItemId) {
+      // 回退：找 id 含 cover 的图片 item
+      opfDoc.querySelectorAll('manifest item').forEach(item => {
+        const id = (item.getAttribute('id') || '').toLowerCase();
+        const mt = (item.getAttribute('media-type') || '');
+        if (!coverItemId && id.includes('cover') && mt.startsWith('image/')) {
+          coverItemId = item.getAttribute('id');
+        }
+      });
+    }
+
     const spine = Array.from(opfDoc.querySelectorAll('spine itemref')).map(ref => {
       const idref = ref.getAttribute('idref');
       return manifest[idref];
@@ -80,20 +104,38 @@ const Parser = {
     const htmlChapters = [];
 
     // ─── 提取图片：相对路径 → base64 dataURL（单图 > 300KB 跳过）───
+    // 封面图单独放宽到 1MB（封面通常较大，且只存一张）
     const IMAGE_SIZE_LIMIT = 300 * 1024; // 300 KB（原始字节，base64 约 +33%）
+    const COVER_SIZE_LIMIT = 1024 * 1024; // 1 MB（封面图放宽限制）
     const IMAGE_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
     const imageMap = {}; // { 'images/cover.jpg': 'data:image/jpeg;base64,...' }
+
+    // 从 manifest 中找到封面图的 href（zip 相对路径）
+    let coverHref = null;
+    if (coverItemId) {
+      opfDoc.querySelectorAll('manifest item').forEach(item => {
+        if (item.getAttribute('id') === coverItemId) {
+          coverHref = item.getAttribute('href');
+        }
+      });
+    }
+    // coverHref 是相对于 OPF 文件的路径，转为 zip 全路径
+    const coverZipPath = coverHref ? (basePath + coverHref) : null;
+
+    let coverImage = null; // 最终封面 dataURL
 
     for (const [zipPath, zipEntry] of Object.entries(zip.files)) {
       if (zipEntry.dir) continue;
       const ext = zipPath.split('.').pop().toLowerCase();
       if (!IMAGE_MIME[ext]) continue;
-      // 跳过超大图片
+      const isCover = coverZipPath && (zipPath === coverZipPath || zipPath === coverHref);
+      // 封面图放宽到 1MB，其余图片 300KB
+      const sizeLimit = isCover ? COVER_SIZE_LIMIT : IMAGE_SIZE_LIMIT;
       const rawSize = zipEntry._data ? (zipEntry._data.uncompressedSize || 0) : 0;
-      if (rawSize > IMAGE_SIZE_LIMIT) continue;
+      if (rawSize > sizeLimit) continue;
       try {
         const bytes = await zipEntry.async('uint8array');
-        if (bytes.length > IMAGE_SIZE_LIMIT) continue; // 二次检查实际大小
+        if (bytes.length > sizeLimit) continue; // 二次检查实际大小
         // 转 base64（分块处理，避免大图触发调用栈溢出）
         const CHUNK = 8192;
         let binary = '';
@@ -102,10 +144,13 @@ const Parser = {
         }
         const b64 = btoa(binary);
         const mime = IMAGE_MIME[ext];
+        const dataUrl = `data:${mime};base64,${b64}`;
         // 存两种 key：zip 全路径 和 相对于 basePath 的路径（章节 src 通常是相对路径）
         const relPath = zipPath.startsWith(basePath) ? zipPath.slice(basePath.length) : zipPath;
-        imageMap[relPath] = `data:${mime};base64,${b64}`;
-        imageMap[zipPath] = `data:${mime};base64,${b64}`; // 也存全路径备用
+        imageMap[relPath] = dataUrl;
+        imageMap[zipPath] = dataUrl; // 也存全路径备用
+        // 记录封面图
+        if (isCover) coverImage = dataUrl;
       } catch (e) {
         // 单张图片失败不影响整体
       }
@@ -131,7 +176,8 @@ const Parser = {
       author,
       content: textChapters.join('\n\n'),
       htmlContent: htmlChapters.join('<hr class="chapter-break">'),
-      imageMap,   // { relPath: dataURL } 供阅读器渲染时填充 img src
+      imageMap,     // { relPath: dataURL } 供阅读器渲染时填充 img src
+      coverImage,   // 封面图 dataURL（null 表示无封面）
       format: 'epub',
       size: file.size,
       chapters: textChapters.length
@@ -160,12 +206,36 @@ const Parser = {
       if (onProgress) onProgress(i, pdf.numPages);
     }
 
+    // PDF 封面：用第一页渲染结果生成缩略图（降低分辨率节省存储）
+    let coverImage = null;
+    if (pdfPages.length > 0) {
+      try {
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = pdfPages[0];
+        });
+        const thumbCanvas = document.createElement('canvas');
+        // 缩略图宽度固定 300px，高度等比缩放
+        const thumbW = 300;
+        const thumbH = Math.round(img.height * thumbW / img.width);
+        thumbCanvas.width = thumbW;
+        thumbCanvas.height = thumbH;
+        thumbCanvas.getContext('2d').drawImage(img, 0, 0, thumbW, thumbH);
+        coverImage = thumbCanvas.toDataURL('image/jpeg', 0.85);
+      } catch (e) {
+        // 缩略图生成失败不影响整体
+      }
+    }
+
     return {
       title,
       content: '',           // PDF 不提取文字到 content（避免乱序错字）
       pdfPages,              // dataURL 数组，供阅读界面显示
       pdfData: pdfDataCopy,  // 克隆的数据，供 AI 按需提取文字（原始 buffer 已被 pdf.js detach）
       pdfScale: 2.0,         // 渲染缩放比，text layer 坐标对齐用
+      coverImage,            // 封面缩略图 dataURL（第一页压缩版）
       format: 'pdf',
       size: file.size,
       chapters: pdf.numPages

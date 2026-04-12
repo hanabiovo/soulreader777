@@ -390,6 +390,45 @@
   border-radius: inherit;
 }
 
+/* ─── 图片封面（有 coverImage 时覆盖文字风格） ─── */
+.book-cover .cover-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+  border-radius: inherit;
+  pointer-events: none; /* 不拦截点击，让事件穿透到父级或删除按钮 */
+  z-index: 0;
+}
+
+/* 图片封面底部遮罩（用于显示进度条） */
+.book-cover .cover-img-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 图片封面进度条 */
+.book-cover .cover-img-progress {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 3px;
+  background: rgba(255,255,255,0.25);
+  border-radius: 0 0 3px 3px;
+}
+
+.book-cover .cover-img-progress-fill {
+  height: 100%;
+  background: rgba(255,255,255,0.75);
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+
 /* ─── 网格视图删除按钮 ─── */
 .book-del-btn {
   position: absolute;

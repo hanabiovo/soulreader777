@@ -142,6 +142,8 @@ const Settings = {
     this.renderFontSettings();
     // 封面风格初始化，默认方案 C
     this.loadCoverStyle();
+    // 显示原书封面开关初始化
+    this.loadCoverImageToggle();
   },
 
   // ─── 打开/关闭（兼容旧调用） ───
@@ -777,6 +779,33 @@ const Settings = {
       const el = container.querySelector(`[data-style="${s}"]`);
       if (el) el.classList.toggle('active', this._coverStyle === s);
     });
+  },
+
+  // ─── 显示原书封面开关 ───
+  loadCoverImageToggle() {
+    // 默认开启（首次使用即展示封面图）
+    const enabled = localStorage.getItem('sr_show_cover_image') !== 'false';
+    this._showCoverImage = enabled;
+    this._renderCoverImageToggleUI();
+  },
+
+  _renderCoverImageToggleUI() {
+    const btn = document.getElementById('cover-image-toggle');
+    if (!btn) return;
+    if (this._showCoverImage) {
+      btn.textContent = '已开启';
+      btn.classList.add('active');
+    } else {
+      btn.textContent = '已关闭';
+      btn.classList.remove('active');
+    }
+  },
+
+  toggleCoverImage() {
+    this._showCoverImage = !this._showCoverImage;
+    localStorage.setItem('sr_show_cover_image', this._showCoverImage ? 'true' : 'false');
+    this._renderCoverImageToggleUI();
+    App.renderShelf(); // 立即刷新书架
   },
 
   // ─── 数据导入 ───

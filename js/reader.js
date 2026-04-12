@@ -1858,6 +1858,11 @@ const Reader = {
 
   // 上一页
   prevPage() {
+    // 防抖：300ms 内只响应一次翻页（防止触摸事件重复触发）
+    const now = Date.now();
+    if (now - (this._lastPageTurn || 0) < 300) return;
+    this._lastPageTurn = now;
+
     if (this._isPdf) {
       const step = (this._dualPage && this._paginationMode) ? 2 : 1;
       const target = this._pdfCurrentPage - step;
@@ -1872,6 +1877,11 @@ const Reader = {
 
   // 下一页
   nextPage() {
+    // 防抖：300ms 内只响应一次翻页（防止触摸事件重复触发）
+    const now = Date.now();
+    if (now - (this._lastPageTurn || 0) < 300) return;
+    this._lastPageTurn = now;
+
     if (this._isPdf) {
       const step = (this._dualPage && this._paginationMode) ? 2 : 1;
       const target = this._pdfCurrentPage + step;
