@@ -1177,11 +1177,22 @@ const Reader = {
     });
 
     // 同步单/双页按钮
-    // 按钮状态反映实际生效状态（_dualPageEffective），而非用户持久化设置（_dualPage）
-    // 避免已降级为单页时面板仍显示"双页"选中
+    // 竖屏或窄屏时禁用"双页"按钮，防止用户切换到不适合的布局
+    const orientType2 = screen.orientation?.type ?? '';
+    const isPortraitNow = orientType2
+      ? orientType2.startsWith('portrait')
+      : (window.screen.height > window.screen.width) || (window.innerHeight > window.innerWidth);
+    const canDual = !isPortraitNow && window.innerWidth >= 480;
     const effectiveDual = this._dualPageEffective ?? this._dualPage;
     document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
-      btn.classList.toggle('active', (btn.dataset.value === 'dual') === effectiveDual);
+      const isDualBtn = btn.dataset.value === 'dual';
+      btn.classList.toggle('active', isDualBtn === effectiveDual);
+      // 竖屏/窄屏时禁用双页按钮
+      if (isDualBtn) {
+        btn.disabled = !canDual;
+        btn.style.opacity = canDual ? '' : '0.3';
+        btn.style.cursor = canDual ? '' : 'not-allowed';
+      }
     });
 
     // 控制「版式」行的可见性（分页模式下显示，含 PDF 分页）
@@ -1492,7 +1503,15 @@ const Reader = {
         btn.classList.toggle('active', (btn.dataset.value === 'dual') === dual);
       });
     } else {
-      // EPUB/TXT：重置实际生效缓存，强制 recalcPages 重新判断是否降级并同步按钮
+      // EPUB/TXT：先检查当前屏幕是否允许双页
+      const ot = screen.orientation?.type ?? '';
+      const portrait = ot ? ot.startsWith('portrait')
+        : (window.screen.height > window.screen.width) || (window.innerHeight > window.innerWidth);
+      if (dual && (portrait || window.innerWidth < 480)) {
+        // 竖屏或窄屏：忽略切换请求，不修改持久化设置
+        return;
+      }
+      // 重置实际生效缓存，强制 recalcPages 重新判断是否降级并同步按钮
       // 注意：不在此处直接设置 dual-page 类，完全交由 recalcPages 决定实际生效状态
       this._dualPageEffective = undefined;
       if (this._paginationMode) {
@@ -1670,11 +1689,16 @@ const Reader = {
     if (!wrapper) return;
 
     // ── 自动降级：窄屏或竖屏时强制单页 ──
-    // 阈值 600px：低于此宽度双页列太窄，阅读体验差
-    // 竖屏检测：高度 > 宽度（手机竖持）
+    // 阈值 480px：低于此宽度双页列太窄，阅读体验差
+    // 竖屏检测：优先用 screen.orientation（安卓 Chrome 更可靠），
+    //           回退到 screen.width/height（不受地址栏影响），
+    //           最后才用 innerHeight/innerWidth
     const DUAL_MIN_WIDTH = 480;
     const isNarrow = window.innerWidth < DUAL_MIN_WIDTH;
-    const isPortrait = window.innerHeight > window.innerWidth;
+    const orientType = screen.orientation?.type ?? '';
+    const isPortrait = orientType
+      ? orientType.startsWith('portrait')
+      : (window.screen.height > window.screen.width) || (window.innerHeight > window.innerWidth);
     // _dualPageEffective：实际生效的双页状态（不修改用户持久化设置）
     const dualEffective = this._dualPage && !isNarrow && !isPortrait;
     // 若实际生效状态与上次不同，同步 container 类名和按钮
