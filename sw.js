@@ -3,24 +3,25 @@
    ═══════════════════════════════════════ */
 
 const CACHE_NAME = 'soulreader-v1';
+const BASE = '/soulreader777';
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/css/base.css',
-  '/css/layout.css',
-  '/css/shelf.css',
-  '/css/reader.css',
-  '/css/sidebar.css',
-  '/css/notes.css',
-  '/css/settings.css',
-  '/js/store.js',
-  '/js/parser.js',
-  '/js/ai.js',
-  '/js/reader.js',
-  '/js/notes.js',
-  '/js/settings.js',
-  '/js/app.js',
-  '/manifest.json'
+  BASE + '/',
+  BASE + '/index.html',
+  BASE + '/css/base.css',
+  BASE + '/css/layout.css',
+  BASE + '/css/shelf.css',
+  BASE + '/css/reader.css',
+  BASE + '/css/sidebar.css',
+  BASE + '/css/notes.css',
+  BASE + '/css/settings.css',
+  BASE + '/js/store.js',
+  BASE + '/js/parser.js',
+  BASE + '/js/ai.js',
+  BASE + '/js/reader.js',
+  BASE + '/js/notes.js',
+  BASE + '/js/settings.js',
+  BASE + '/js/app.js',
+  BASE + '/manifest.json'
 ];
 
 // 安装
