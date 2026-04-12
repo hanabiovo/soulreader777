@@ -622,10 +622,9 @@ const Reader = {
     if (entry && entry.el) {
       if (this._paginationMode) {
         // 分页模式：计算元素所在页码
-        // offsetLeft 相对于 offsetParent（#reader-content），需减去容器 padding
+        // 新方案下 container.paddingLeft 已被清零，offsetLeft 即列坐标
         const container = document.getElementById('reader-content');
-        const padL = parseFloat(getComputedStyle(container).paddingLeft) || 0;
-        const elLeft = entry.el.offsetLeft - padL;
+        const elLeft = entry.el.offsetLeft;
         const page = Math.floor(elLeft / this._pageWidth);
         this.goToPage(page);
       } else {
@@ -1541,18 +1540,23 @@ const Reader = {
     container.classList.remove('paginated');
     container.classList.remove('dual-page');
 
-    // 解包 page-columns
+    // 解包 page-columns，恢复 container 的水平 padding
     const wrapper = container.querySelector('.page-columns');
     if (wrapper) {
       wrapper.style.transform = '';
       wrapper.style.columnWidth = '';
       wrapper.style.columnGap = '';
       wrapper.style.height = '';
+      wrapper.style.paddingLeft = '';
+      wrapper.style.paddingRight = '';
       while (wrapper.firstChild) {
         container.appendChild(wrapper.firstChild);
       }
       wrapper.remove();
     }
+    // 恢复 container 水平 padding（由 CSS 变量控制，清空 inline style 即可）
+    container.style.paddingLeft = '';
+    container.style.paddingRight = '';
 
     // 隐藏页码指示器
     const indicator = document.getElementById('page-indicator-inner');
@@ -1590,8 +1594,10 @@ const Reader = {
     // 降级：第 0 页直接返回 charOffset=0
     if (this._currentPage === 0) return { charOffset: 0 };
 
-    const cs = getComputedStyle(container);
-    const padL = parseFloat(cs.paddingLeft) || 0;
+    // container.paddingLeft 保持不变（CSS 变量控制视觉边距），
+    // .page-columns 在 padding-box 内，column-gap=0，
+    // parent.offsetLeft 是元素在列布局中的水平坐标（从 wrapper 左边缘起）。
+    // _pageWidth = sw/N（精确列宽），pageStart = currentPage * _pageWidth。
     const pageStart = this._currentPage * this._pageWidth;
 
     // TreeWalker 遍历文本节点，累加字符偏移
@@ -1608,7 +1614,7 @@ const Reader = {
       const parent = node.parentElement;
       if (!parent) { charOffset += node.nodeValue.length; continue; }
       // 只对"可能在当前页"的节点读一次 offsetLeft
-      const elLeft = parent.offsetLeft - padL;
+      const elLeft = parent.offsetLeft;
       if (elLeft >= pageStart) {
         // 找到当前页第一个文本节点，记录此时的累计偏移
         return { charOffset };
@@ -1632,58 +1638,54 @@ const Reader = {
     // 重算时临时禁用翻页动画，避免滑块拖动时抖动
     wrapper.style.transition = 'none';
 
-    // 获取 padding 值（只读取，不修改）
+    // ── 分页布局核心 ──
+    // #reader-content 保留 CSS padding（视觉左右边距）。
+    // .page-columns 在 padding-box 内，实际可用宽度 = clientWidth - padL - padR。
+    // 设置 column-gap = 0，column-width = 实际可用宽度（单页）或一半（双页）。
+    // _pageWidth 在 rAF 后从 scrollWidth 精确反推：
+    //   column-gap=0 时，scrollWidth = N * actualColW，_pageWidth = scrollWidth / N。
     const cs = getComputedStyle(container);
     const padL = parseFloat(cs.paddingLeft) || 0;
     const padR = parseFloat(cs.paddingRight) || 0;
     const padT = parseFloat(cs.paddingTop) || 0;
     const padB = parseFloat(cs.paddingBottom) || 0;
 
-    // 内容区可用尺寸（扣除 padding）
-    let contentW = container.clientWidth - padL - padR;
-    // 底栏常驻，高度固定，内容区高度直接使用 clientHeight（底栏在 flex 布局外）
+    // padding-box 内可用宽度（浏览器用此宽度排列列）
+    const contentW = Math.max(container.clientWidth - padL - padR, 100);
     let contentH = container.clientHeight - padT - padB;
-
-    // 兜底保护：确保有效数值（不修改 DOM padding，仅限制计算值）
-    contentW = Math.max(contentW, 200);
     contentH = Math.max(contentH, 120);
 
-    // 列间距 = padL + padR（将下一列推出 padding-box 裁切区）
-    const pageGap = padL + padR;
+    // 清除 wrapper 残留 inline padding
+    wrapper.style.paddingLeft = '';
+    wrapper.style.paddingRight = '';
 
     if (this._dualPage) {
-      // 双页：2 列可见
-      // 不对 colW 取整——column-count:2 已确定列数，浏览器会精确分配列宽
-      const colW = (contentW - pageGap) / 2;
+      // 双页：每屏 2 列，列宽 = contentW/2，gap = 0
       wrapper.style.columnCount = '2';
-      wrapper.style.columnWidth = Math.max(colW, 100) + 'px';
-      wrapper.style.columnGap = pageGap + 'px';
-      // _pageWidth 直接用 contentW + pageGap，与浏览器实际步进一致，
-      // 避免从取整后的 colW 反推导致每页累积偏移
-      this._pageWidth = contentW + pageGap;
+      wrapper.style.columnWidth = Math.floor(contentW / 2) + 'px';
+      wrapper.style.columnGap = '0px';
+      // 预估步进（rAF 后精确反推）
+      this._pageWidth = contentW;
     } else {
-      // 单页：1 列 = contentW
+      // 单页：列宽 = contentW，gap = 0
       wrapper.style.columnCount = '1';
-      wrapper.style.columnWidth = Math.round(contentW) + 'px';
-      wrapper.style.columnGap = pageGap + 'px';
-      // _pageWidth 先用估算值，待浏览器重排后从 scrollWidth 反推精确值
-      this._pageWidth = Math.round(contentW + pageGap);
+      wrapper.style.columnWidth = contentW + 'px';
+      wrapper.style.columnGap = '0px';
+      // 预估步进（rAF 后精确反推）
+      this._pageWidth = contentW;
     }
 
     wrapper.style.height = contentH + 'px';
 
-    // 等待浏览器重排后再测量 scrollWidth
+    // 等待浏览器重排后测量 scrollWidth，精确反推每页步进
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const sw = wrapper.scrollWidth;
-        // ── 关键修复：从实际 scrollWidth 反推每页真实步进 ──
-        // 浏览器在高 DPR 设备上排版时会做亚像素对齐，导致实际列宽
-        // 与 JS 计算的 _pageWidth 存在误差，翻页越多累积偏移越大。
-        // 解决：用估算值先算出总页数，再以 scrollWidth/totalPages 为精确步进。
-        const estimatedPages = Math.max(1, Math.round(sw / this._pageWidth));
-        // 用 scrollWidth 整除总页数得到精确步进，消除亚像素累积误差
-        this._pageWidth = sw / estimatedPages;
-        this._totalPages = estimatedPages;
+        // column-gap=0：scrollWidth = N * actualColW
+        // N = round(sw / 预估contentW)，精确步进 = sw / N
+        const N = Math.max(1, Math.round(sw / this._pageWidth));
+        this._pageWidth = sw / N;
+        this._totalPages = N;
 
         // ── 重排后：按字符偏移恢复页码（简化版 CFI） ──
         if (anchor && anchor.charOffset != null) {
@@ -1706,8 +1708,8 @@ const Reader = {
                 // 找到目标节点，读一次 offsetLeft 定位新页码
                 const parent = tn.parentElement;
                 if (parent) {
-                  const elLeft = parent.offsetLeft - padL;
-                  const newPage = Math.floor(elLeft / this._pageWidth);
+                   const elLeft = parent.offsetLeft;
+                   const newPage = Math.floor(elLeft / this._pageWidth);
                   this._currentPage = Math.max(0, Math.min(newPage, this._totalPages - 1));
                   found = true;
                 }
@@ -1984,10 +1986,10 @@ const Reader = {
 
       if (this._paginationMode) {
         // 分页模式：找到目标元素所在页并跳转
+        // 新方案下 container.paddingLeft 已被清零，offsetLeft 即列坐标
         const wrapper = container.querySelector('.page-columns');
         if (!wrapper) return;
-        const padL = parseFloat(getComputedStyle(container).paddingLeft) || 0;
-        const elLeft = targetEl.offsetLeft - padL;
+        const elLeft = targetEl.offsetLeft;
         const page = Math.floor(elLeft / this._pageWidth);
         this.goToPage(Math.max(0, Math.min(page, this._totalPages - 1)));
       } else {

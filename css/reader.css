@@ -801,7 +801,7 @@
    分页模式
    ═══════════════════════════════════════ */
 
-/* 分页容器：水平 padding 归零，由 page-columns 内部处理 */
+/* 分页容器：保留 padding 作为视觉边距，overflow hidden 裁切列滑动 */
 #reader-content.paginated {
   overflow: hidden;
   position: relative;
