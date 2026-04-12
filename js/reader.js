@@ -1177,8 +1177,11 @@ const Reader = {
     });
 
     // 同步单/双页按钮
+    // 按钮状态反映实际生效状态（_dualPageEffective），而非用户持久化设置（_dualPage）
+    // 避免已降级为单页时面板仍显示"双页"选中
+    const effectiveDual = this._dualPageEffective ?? this._dualPage;
     document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
-      btn.classList.toggle('active', (btn.dataset.value === 'dual') === this._dualPage);
+      btn.classList.toggle('active', (btn.dataset.value === 'dual') === effectiveDual);
     });
 
     // 控制「版式」行的可见性（分页模式下显示，含 PDF 分页）
@@ -1620,9 +1623,8 @@ const Reader = {
   _elColumnLeft(el, wrapper) {
     const wRect = wrapper.getBoundingClientRect();
     const eRect = el.getBoundingClientRect();
-    // wrapper 当前已被 translateX(-currentPage * _pageWidth) 移动
-    // 所以元素在列布局中的真实 x = (eRect.left - wRect.left) + currentPage * _pageWidth
-    return (eRect.left - wRect.left) + this._currentPage * this._pageWidth;
+    // recalcPages 调用时 wrapper 已归零（translateX=0），直接取相对坐标即可
+    return (eRect.left - wRect.left);
   },
 
   _captureAnchor() {
@@ -1670,7 +1672,7 @@ const Reader = {
     // ── 自动降级：窄屏或竖屏时强制单页 ──
     // 阈值 600px：低于此宽度双页列太窄，阅读体验差
     // 竖屏检测：高度 > 宽度（手机竖持）
-    const DUAL_MIN_WIDTH = 600;
+    const DUAL_MIN_WIDTH = 480;
     const isNarrow = window.innerWidth < DUAL_MIN_WIDTH;
     const isPortrait = window.innerHeight > window.innerWidth;
     // _dualPageEffective：实际生效的双页状态（不修改用户持久化设置）
@@ -1723,17 +1725,16 @@ const Reader = {
     contentH = Math.max(contentH, 120);
 
     if (dualEffective) {
-      // 双页：2 列可见，列宽 = (contentW - gap) / 2
-      const colW = (contentW - pageGap) / 2;
+      // 双页：2 列可见，只设 column-count 让浏览器强制等宽平分，消除列宽舍入误差
       wrapper.style.columnCount = '2';
-      wrapper.style.columnWidth = Math.max(colW, 100) + 'px';
+      wrapper.style.columnWidth = '';   // 不设 column-width，避免浏览器"建议值"舍入
       wrapper.style.columnGap = pageGap + 'px';
       // 预估步进（rAF 后精确反推）
       this._pageWidth = contentW + pageGap;
     } else {
-      // 单页：列宽 = contentW，gap = padL+padR
+      // 单页：只设 column-count，浏览器强制单列填满容器，无舍入问题
       wrapper.style.columnCount = '1';
-      wrapper.style.columnWidth = contentW + 'px';
+      wrapper.style.columnWidth = '';   // 不设 column-width，避免浏览器"建议值"舍入
       wrapper.style.columnGap = pageGap + 'px';
       // 预估步进（rAF 后精确反推）
       this._pageWidth = contentW + pageGap;
@@ -1748,8 +1749,17 @@ const Reader = {
         const gap = pageGap;
         // scrollWidth + gap = N * (colW + gap) = N * _pageWidth
         const N = Math.max(1, Math.round((sw + gap) / this._pageWidth));
-        this._pageWidth = (sw + gap) / N;
+        // 对齐到物理像素，防止 translateX 在高 DPI 屏触发亚像素合成层偏移
+        const dpr = window.devicePixelRatio || 1;
+        this._pageWidth = Math.round(((sw + gap) / N) * dpr) / dpr;
         this._totalPages = N;
+
+        // 用精确的 _pageWidth 反算 contentW，强制设为 wrapper 宽度并居中
+        // 这样每次 translateX 步进都是物理像素整数倍，且内容始终视觉居中
+        const exactContentW = this._pageWidth - gap;
+        wrapper.style.width = exactContentW + 'px';
+        wrapper.style.marginLeft = 'auto';
+        wrapper.style.marginRight = 'auto';
 
         // ── 重排后：按字符偏移恢复页码（简化版 CFI） ──
         // 先将 wrapper 归零（translateX=0），使 getBoundingClientRect 直接反映列坐标
