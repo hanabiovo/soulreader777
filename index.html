@@ -538,8 +538,9 @@
     <!-- Service Worker 注册 -->
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js')
-                .then(reg => console.log('Service Worker 注册成功'))
+            // scope 使用相对路径 './'，与 sw.js 同目录，确保 SW 控制范围与缓存路径一致
+            navigator.serviceWorker.register('./sw.js', { scope: './' })
+                .then(reg => console.log('Service Worker 注册成功', reg.scope))
                 .catch(err => console.log('Service Worker 注册失败:', err));
         }
     </script>

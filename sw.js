@@ -2,8 +2,11 @@
    SW.JS - Service Worker
    ═══════════════════════════════════════ */
 
-const CACHE_NAME = 'soulreader-v0.3.6-beta';
-const BASE = '/soulreader777';
+const CACHE_NAME = 'soulreader-v0.3.7-beta';
+
+// 动态计算 BASE：取 sw.js 所在目录，避免硬编码路径导致缓存 URL 与实际请求不匹配
+const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
+
 const urlsToCache = [
   BASE + '/',
   BASE + '/index.html',
@@ -24,15 +27,17 @@ const urlsToCache = [
   BASE + '/manifest.json'
 ];
 
-// 安装：缓存所有资源，但不调用 skipWaiting，让新 SW 进入 waiting 状态
-// 这样 checkUpdate() 才能检测到 reg.waiting 并手动触发更新
+// 安装：缓存所有资源，立即 skipWaiting
+// Network-First 策略下旧 SW 已能拿到最新资源，无需等待用户手动触发
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(urlsToCache))
+      .then(() => self.skipWaiting())
   );
 });
 
-// 激活：清除旧版缓存，接管所有客户端
+// 激活：清除旧版缓存，立即接管所有客户端
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(cacheNames => {
@@ -47,7 +52,7 @@ self.addEventListener('activate', event => {
   );
 });
 
-// 监听主线程发来的 skipWaiting 指令（"检查更新"按钮触发）
+// 监听主线程发来的 SKIP_WAITING 指令（兼容旧版调用）
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
@@ -56,7 +61,6 @@ self.addEventListener('message', event => {
 
 // 拦截请求：Network-First 策略
 // 优先从网络获取最新资源，网络失败时才回退到缓存
-// 这样即使缓存存在，也能及时获取更新后的文件
 self.addEventListener('fetch', event => {
   // 跳过外部 CDN 请求
   if (!event.request.url.startsWith(self.location.origin)) {

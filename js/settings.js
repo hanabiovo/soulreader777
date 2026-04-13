@@ -863,7 +863,15 @@ const Settings = {
     }
   },
 
-  // ─── 检查更新（强制网络拉取最新 SW，有新版则应用并刷新） ───
+  // ─── 检查更新（强制网络拉取最新 SW，有新版则自动激活并刷新） ───
+  //
+  // 工作原理：
+  //   sw.js 在 install 时调用 skipWaiting()，新 SW 安装完成后立即激活，
+  //   触发 navigator.serviceWorker 的 controllerchange 事件，页面随即刷新。
+  //   reg.update() 触发网络拉取 sw.js；若文件有变化则启动安装流程；
+  //   若无变化（字节相同）则不产生新 SW，controllerchange 不触发。
+  //   通过 reg 的 updatefound 事件判断是否真的有新版本，避免误报。
+  //
   async checkUpdate() {
     const btn = document.getElementById('update-btn');
     const status = document.getElementById('update-status');
@@ -877,6 +885,24 @@ const Settings = {
     if (btn) { btn.disabled = true; btn.textContent = '检查中…'; }
     if (status) status.textContent = '正在检查更新…';
 
+    // 防止多次点击重复注册 controllerchange
+    if (this._ccHandler) {
+      navigator.serviceWorker.removeEventListener('controllerchange', this._ccHandler);
+      this._ccHandler = null;
+    }
+
+    const cleanup = () => {
+      if (this._ccHandler) {
+        navigator.serviceWorker.removeEventListener('controllerchange', this._ccHandler);
+        this._ccHandler = null;
+      }
+      if (this._updateFoundHandler && this._swReg) {
+        this._swReg.removeEventListener('updatefound', this._updateFoundHandler);
+        this._updateFoundHandler = null;
+        this._swReg = null;
+      }
+    };
+
     try {
       const reg = await navigator.serviceWorker.getRegistration();
       if (!reg) {
@@ -885,30 +911,44 @@ const Settings = {
         return;
       }
 
-      // 监听 controllerchange：新 SW 接管后立即刷新页面
-      // 必须在 reg.update() 之前注册，避免竞态
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        window.location.reload();
-      }, { once: true });
+      // 标记是否检测到新版本（updatefound 触发时置 true）
+      let updateFound = false;
 
-      // 主动触发 SW 检查（从网络拉取最新 sw.js）
+      // updatefound：reg.update() 发现 sw.js 有变化，新 SW 开始安装
+      this._swReg = reg;
+      this._updateFoundHandler = () => {
+        updateFound = true;
+        if (status) status.textContent = '发现新版本，正在安装…';
+      };
+      reg.addEventListener('updatefound', this._updateFoundHandler, { once: true });
+
+      // controllerchange：新 SW 激活并接管页面，立即刷新
+      this._ccHandler = () => { window.location.reload(); };
+      navigator.serviceWorker.addEventListener('controllerchange', this._ccHandler, { once: true });
+
+      // 触发网络检查（拉取最新 sw.js）
       await reg.update();
 
-      // reg.update() 完成后，检查是否有新 SW 在等待
-      const newWorker = reg.installing || reg.waiting;
-      if (newWorker) {
-        if (status) status.textContent = '发现新版本，正在应用…';
-        // 发送 skipWaiting，让新 SW 立即激活
-        // 激活后 controllerchange 事件触发，页面自动刷新
-        newWorker.postMessage({ type: 'SKIP_WAITING' });
-        // 兜底：3s 后如未刷新则强制刷新
-        setTimeout(() => window.location.reload(), 3000);
-      } else {
-        // 当前已是最新版，移除 controllerchange 监听（{ once: true } 已自动移除）
+      // reg.update() resolve 后等待一段时间：
+      //   - 若有新版：updatefound 已触发，新 SW 正在安装，安装完自动 skipWaiting → controllerchange → reload
+      //   - 若无新版：updatefound 未触发，超时后显示"已是最新"
+      // 等待时间：最长 8s（网络慢时给足够时间安装）
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      if (!updateFound) {
+        // 0.5s 内 updatefound 未触发 → 无新版本
+        cleanup();
         if (status) status.innerHTML = ver ? `✓ 已是最新版本（${ver}）` : '✓ 已是最新版本';
         if (btn) { btn.disabled = false; btn.textContent = '检查'; }
       }
+      // 若 updateFound = true，等待 controllerchange 触发 reload；
+      // 兜底：8s 后强制刷新（防止 controllerchange 因某种原因未触发）
+      if (updateFound) {
+        setTimeout(() => { cleanup(); window.location.reload(); }, 8000);
+      }
+
     } catch (e) {
+      cleanup();
       if (status) status.textContent = '检查失败：' + e.message;
       if (btn) { btn.disabled = false; btn.textContent = '检查'; }
     }
