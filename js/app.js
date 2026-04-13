@@ -2,6 +2,8 @@
    APP.JS - 入口、tab 切换、全局初始化
    ═══════════════════════════════════════ */
 
+const APP_VERSION = '0.3.0-beta';
+
 const App = {
   currentTab: 'shelf',
   books: [],
@@ -103,6 +105,10 @@ const App = {
 
     // 初始化调试面板
     this._initDebugPanel();
+
+    // 显示版本号
+    const verEl = document.getElementById('app-version-label');
+    if (verEl && typeof APP_VERSION !== 'undefined') verEl.textContent = APP_VERSION;
 
     this.log('info', 'App', '应用初始化完成');
   },

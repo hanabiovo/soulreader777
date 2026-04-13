@@ -856,6 +856,7 @@ const Settings = {
   async checkUpdate() {
     const btn = document.getElementById('update-btn');
     const status = document.getElementById('update-status');
+    const ver = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '';
 
     if (!('serviceWorker' in navigator)) {
       if (status) status.textContent = '当前环境不支持 Service Worker';
@@ -894,7 +895,7 @@ const Settings = {
         setTimeout(() => window.location.reload(), 2000);
       } else {
         // 当前已是最新版
-        if (status) status.textContent = '✓ 已是最新版本';
+        if (status) status.innerHTML = ver ? `✓ 已是最新版本（${ver}）` : '✓ 已是最新版本';
         if (btn) { btn.disabled = false; btn.textContent = '检查'; }
       }
     } catch (e) {
