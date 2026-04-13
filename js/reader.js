@@ -1437,9 +1437,9 @@ const Reader = {
     // 同步单/双页按钮
     // 竖屏或窄屏时禁用"双页"按钮，防止用户切换到不适合的布局
     const orientType2 = screen.orientation?.type ?? '';
-    const isPortraitNow = orientType2
-      ? orientType2.startsWith('portrait')
-      : window.screen.height > window.screen.width;
+    // 竖屏判断：屏幕方向为竖屏，或窗口高度大于宽度（兼容电脑端 PWA 窗口缩放）
+    const isPortraitNow = (orientType2 ? orientType2.startsWith('portrait') : window.screen.height > window.screen.width)
+      || (window.innerHeight > window.innerWidth);
     const canDual = !isPortraitNow && window.innerWidth >= 480;
     const effectiveDual = this._dualPageEffective ?? this._dualPage;
     document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
@@ -1779,8 +1779,9 @@ const Reader = {
     } else {
       // EPUB/TXT：先检查当前屏幕是否允许双页
       const ot = screen.orientation?.type ?? '';
-      const portrait = ot ? ot.startsWith('portrait')
-        : window.screen.height > window.screen.width;
+      // 竖屏判断：屏幕方向为竖屏，或窗口高度大于宽度（兼容电脑端 PWA 窗口缩放）
+      const portrait = (ot ? ot.startsWith('portrait') : window.screen.height > window.screen.width)
+        || (window.innerHeight > window.innerWidth);
       if (dual && (portrait || window.innerWidth < 480)) {
         // 竖屏或窄屏：忽略切换请求，不修改持久化设置
         return;
@@ -1967,9 +1968,9 @@ const Reader = {
     const DUAL_MIN_WIDTH = 480;
     const isNarrow = window.innerWidth < DUAL_MIN_WIDTH;
     const orientType = screen.orientation?.type ?? '';
-    const isPortrait = orientType
-      ? orientType.startsWith('portrait')
-      : window.screen.height > window.screen.width;
+    // 竖屏判断：屏幕方向为竖屏，或窗口高度大于宽度（兼容电脑端 PWA 窗口缩放）
+    const isPortrait = (orientType ? orientType.startsWith('portrait') : window.screen.height > window.screen.width)
+      || (window.innerHeight > window.innerWidth);
     const dualEffective = this._dualPage && !isNarrow && !isPortrait;
     if (dualEffective !== this._dualPageEffective) {
       this._dualPageEffective = dualEffective;
