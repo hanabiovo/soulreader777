@@ -150,6 +150,7 @@ const Reader = {
       this._destroyPdfLazyLoad();
       this._pdfSrcMap = null;
       this._pdfPageEls = null;
+      this._pdfLastVisiblePages = null;
       if (this._themeObserver) {
         this._themeObserver.disconnect();
         this._themeObserver = null;
@@ -205,6 +206,8 @@ const Reader = {
     // 同时清空 _renderContentReady，防止 .then() 回调在关闭后执行副作用
     this._renderCancelToken = {};
     this._renderContentReady = null;
+    // 清除 TOC 缓存（换书后目录内容不同，必须重新扫描）
+    this._tocEntries = null;
 
     this.currentBook = null;
     this.currentNoteId = null;
@@ -302,6 +305,8 @@ const Reader = {
       // 旧闭包持有旧 token 引用，检测到不一致时立即停止插入，避免向已清空的容器写入
       const token = {};
       this._renderCancelToken = token;
+      // 显示加载提示（大文件分块渲染期间）
+      if (typeof App !== 'undefined') App.showLoadingToast('正在加载…');
       this._renderContentReady = new Promise(resolve => {
         const firstFrag = document.createDocumentFragment();
         for (let i = 0; i < CHUNK_SIZE; i++) {
@@ -327,7 +332,8 @@ const Reader = {
               setTimeout(() => insertChunk(end), 0);
             }
           } else {
-            // 全部段落插入完毕，通知等待方
+            // 全部段落插入完毕，隐藏加载提示并通知等待方
+            if (typeof App !== 'undefined') App.hideLoadingToast();
             resolve();
           }
         };
@@ -511,22 +517,37 @@ const Reader = {
       if (this._dualPage) {
         // 双页模式：对齐到偶数索引，同时显示两页
         if (pageIndex % 2 !== 0) pageIndex = Math.max(0, pageIndex - 1);
+        const toShow = [pageIndex, pageIndex + 1].filter(i => i < pages.length);
+        // 增量更新：只隐藏上次可见页，避免遍历全部节点（300 页 PDF 每次翻页省去 298 次 DOM 操作）
+        if (this._pdfLastVisiblePages) {
+          this._pdfLastVisiblePages.forEach(idx => {
+            if (pages[idx]) pages[idx].style.display = 'none';
+          });
+        } else {
+          // 首次或模式切换后：全量隐藏，确保干净状态
+          pages.forEach(p => { p.style.display = 'none'; });
+        }
         // 分页模式下 display:none 的页面不触发 IntersectionObserver，需手动确保图片已加载
-        this._ensurePdfPageImgLoaded(pageIndex);
-        if (pageIndex + 1 < pages.length) this._ensurePdfPageImgLoaded(pageIndex + 1);
-        pages.forEach((p, i) => {
-          p.style.display = (i === pageIndex || i === pageIndex + 1) ? '' : 'none';
+        toShow.forEach(idx => {
+          this._ensurePdfPageImgLoaded(idx);
+          if (pages[idx]) pages[idx].style.display = '';
         });
+        this._pdfLastVisiblePages = toShow;
         // 渲染当前可见页的 text layer
-        this._renderPdfTextLayer(pageIndex);
-        if (pageIndex + 1 < pages.length) this._renderPdfTextLayer(pageIndex + 1);
+        toShow.forEach(idx => this._renderPdfTextLayer(idx));
       } else {
-        // 单页模式：隐藏所有页，只显示目标页
+        // 单页模式：增量更新，只隐藏上次可见页
+        if (this._pdfLastVisiblePages) {
+          this._pdfLastVisiblePages.forEach(idx => {
+            if (pages[idx]) pages[idx].style.display = 'none';
+          });
+        } else {
+          pages.forEach(p => { p.style.display = 'none'; });
+        }
         // 分页模式下 display:none 的页面不触发 IntersectionObserver，需手动确保图片已加载
         this._ensurePdfPageImgLoaded(pageIndex);
-        pages.forEach((p, i) => {
-          p.style.display = i === pageIndex ? '' : 'none';
-        });
+        if (pages[pageIndex]) pages[pageIndex].style.display = '';
+        this._pdfLastVisiblePages = [pageIndex];
         // 渲染当前页的 text layer
         this._renderPdfTextLayer(pageIndex);
       }
@@ -651,6 +672,7 @@ const Reader = {
     const container = document.getElementById('reader-content');
     const pageInner = document.getElementById('page-indicator-inner');
     if (paginated) {
+      this._pdfLastVisiblePages = null; // 强制首次全量处理，确保干净状态
       container.classList.add('pdf-paginated');
       // 恢复双页 CSS 类（如果之前已开启）
       container.classList.toggle('pdf-dual-page', this._dualPage);
@@ -756,8 +778,16 @@ const Reader = {
 
   // ─── 目录构建与显示（内部实现，由 showTOC 调用） ───
   _buildAndShowTOC() {
+    // ── 缓存命中：直接渲染，跳过全文扫描 ──
+    // 大文件段落数万时，每次打开目录都重新扫描+排序开销明显；
+    // _tocEntries 在首次扫描后缓存，close() 时清除
+    if (this._tocEntries) {
+      this._renderTOCFromCache();
+      document.getElementById('toc-panel').classList.add('active');
+      return;
+    }
+
     const panel = document.getElementById('toc-panel');
-    const list = document.getElementById('toc-list');
     const container = document.getElementById('reader-content');
 
     // 收集目录条目：h1/h2/h3 + 正则匹配的 <p>
@@ -810,25 +840,37 @@ const Reader = {
       return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
     });
 
-    if (tocEntries.length === 0) {
-      list.innerHTML = '<div class="toc-empty">本书暂未识别到目录结构，可尝试使用标题格式（# 标题）来组织章节。</div>';
-    } else {
-      list.innerHTML = tocEntries.map((entry, i) => {
-        const indent = (entry.level - 1) * 12;
-        return `<div class="toc-item" style="padding-left: ${20 + indent}px;" onclick="Reader.scrollToTocEntry(${i})">${Reader.escapeHtml(entry.text)}</div>`;
-      }).join('');
-    }
-
-    // 缓存条目引用供滚动使用
+    // 缓存条目引用供滚动和下次打开目录使用
     this._tocEntries = tocEntries;
 
+    this._renderTOCFromCache();
     panel.classList.add('active');
+  },
+
+  // ─── 从缓存渲染目录列表（_buildAndShowTOC 的渲染部分，抽出供缓存命中时复用） ───
+  _renderTOCFromCache() {
+    const list = document.getElementById('toc-list');
+    const entries = this._tocEntries;
+    if (!entries || entries.length === 0) {
+      list.innerHTML = '<div class="toc-empty">本书暂未识别到目录结构，可尝试使用标题格式（# 标题）来组织章节。</div>';
+      return;
+    }
+    list.innerHTML = entries.map((entry, i) => {
+      const indent = (entry.level - 1) * 12;
+      return `<div class="toc-item" style="padding-left: ${20 + indent}px;" onclick="Reader.scrollToTocEntry(${i})">${Reader.escapeHtml(entry.text)}</div>`;
+    }).join('');
   },
 
   // ─── 滚动到目录条目 ───
   scrollToTocEntry(index) {
     const entry = this._tocEntries && this._tocEntries[index];
     if (entry && entry.el) {
+      // 显示跳转提示（500ms 后自动隐藏）
+      if (typeof App !== 'undefined') {
+        const label = entry.text.length > 15 ? entry.text.slice(0, 15) + '…' : entry.text;
+        App.showLoadingToast(`跳转至：${label}`);
+        setTimeout(() => App.hideLoadingToast(), 500);
+      }
       if (this._paginationMode) {
         // 分页模式：用 getBoundingClientRect 计算元素所在页码
         const container = document.getElementById('reader-content');
@@ -1467,7 +1509,7 @@ const Reader = {
     // 字体变更会影响文字宽度，分页模式下需重算分页
     if (this._paginationMode) {
       clearTimeout(this._typoRecalcTimer);
-      this._typoRecalcTimer = setTimeout(() => this.recalcPages(), 200);
+      this._typoRecalcTimer = setTimeout(() => this.recalcPages(), 300);
     }
   },
 
@@ -1571,7 +1613,7 @@ const Reader = {
     // 分页模式下，字号/行高/页边距变更会影响多栏排版，需重算分页
     if (this._paginationMode) {
       clearTimeout(this._typoRecalcTimer);
-      this._typoRecalcTimer = setTimeout(() => this.recalcPages(), 120);
+      this._typoRecalcTimer = setTimeout(() => this.recalcPages(), 300);
     }
   },
 
@@ -1903,6 +1945,11 @@ const Reader = {
     const wrapper = container.querySelector('.page-columns');
     if (!wrapper) return;
 
+    // 仅大文件（段落数 > 3000）显示重排提示，避免小文件也闪烁
+    // paraCount 在 rAF 外提前计算，rAF 回调通过闭包访问，不重复 querySelectorAll
+    const paraCount = wrapper.querySelectorAll('p, h1, h2, h3').length;
+    if (paraCount > 3000 && typeof App !== 'undefined') App.showLoadingToast('正在重排…');
+
     // ── 自动降级：窄屏或竖屏时强制单页 ──
     // 阈值 480px：低于此宽度双页列太窄，阅读体验差
     // 竖屏检测：优先用 screen.orientation（安卓 Chrome 更可靠），
@@ -2049,6 +2096,7 @@ const Reader = {
 
         // 无动画跳到当前页，再恢复 transition
         this.goToPage(this._currentPage);
+        if (paraCount > 3000 && typeof App !== 'undefined') App.hideLoadingToast();
         // 下一帧恢复动画，以便用户手动翻页时有过渡效果
         requestAnimationFrame(() => {
           wrapper.style.transition = '';

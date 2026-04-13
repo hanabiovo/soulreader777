@@ -523,6 +523,22 @@ const App = {
     }, 2000);
   },
 
+  // 持久 toast：显示后不自动消失，需手动调 hideLoadingToast() 关闭
+  // 用于大文件加载、重排等耗时操作的进度提示
+  showLoadingToast(msg) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add('show');
+    // 清除可能存在的自动消失计时器（防止与 showToast 的定时器冲突）
+    if (this._toastTimer) { clearTimeout(this._toastTimer); this._toastTimer = null; }
+  },
+
+  hideLoadingToast() {
+    const el = document.getElementById('toast');
+    if (el) el.classList.remove('show');
+  },
+
   randomColor() {
     const colors = [
       '#e74c3c', '#3498db', '#2ecc71', '#f39c12', 
