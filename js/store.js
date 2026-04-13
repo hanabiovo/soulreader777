@@ -4,7 +4,7 @@
 
 class Store {
   static dbName = 'SoulReaderDB';
-  static version = 1;
+  static version = 2;
   static db = null;
 
   static async init() {
@@ -28,6 +28,10 @@ class Store {
         }
         if (!db.objectStoreNames.contains('notes')) {
           db.createObjectStore('notes', { keyPath: 'id', autoIncrement: true });
+        }
+        // v2：分页布局持久化缓存（key = bookId|viewport|typo params）
+        if (!db.objectStoreNames.contains('pageCache')) {
+          db.createObjectStore('pageCache', { keyPath: 'key' });
         }
       };
     });

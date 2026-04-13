@@ -2,7 +2,7 @@
    APP.JS - 入口、tab 切换、全局初始化
    ═══════════════════════════════════════ */
 
-const APP_VERSION = '0.3.2-beta';
+const APP_VERSION = '0.3.3-beta';
 
 const App = {
   currentTab: 'shelf',
@@ -321,15 +321,21 @@ const App = {
 
   // 打开书籍
   async openBook(bookId) {
-    const book = await Store.get('books', bookId);
-    if (!book) return;
-    
-    // 更新最近打开时间
-    book.lastOpenedAt = Date.now();
-    await Store.put('books', book);
-    
-    // 打开阅读器
-    await Reader.open(bookId);
+    this.showLoadingToast('正在打开…');
+    try {
+      const book = await Store.get('books', bookId);
+      if (!book) { this.hideLoadingToast(); return; }
+      
+      // 更新最近打开时间
+      book.lastOpenedAt = Date.now();
+      await Store.put('books', book);
+      
+      // 打开阅读器（Reader.open 内部会接管 loading toast 的生命周期）
+      await Reader.open(bookId);
+    } catch (e) {
+      this.hideLoadingToast();
+      throw e;
+    }
   },
 
   // 删除书籍

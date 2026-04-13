@@ -62,6 +62,8 @@ const Reader = {
       this._setupKeyboardNav();
       this._setupSwipeGesture();
       this._setupWheelNav();
+      // PDF 模式不经过 recalcPages，在此处结束 loading toast
+      if (typeof App !== 'undefined') App.hideLoadingToast();
       return;
     }
     
@@ -77,6 +79,7 @@ const Reader = {
       // 设置待恢复的页码，enablePagination → recalcPages 完成后会 goToPage
       this._currentPage = book.currentPage || 0;
       // 等待内容完全插入后再启用分页，避免大 TXT 分块渲染时 recalcPages 计算不准
+      // recalcPages 内部负责调用 App.hideLoadingToast()
       if (this._renderContentReady) {
         this._renderContentReady.then(() => this.enablePagination());
       } else {
@@ -92,6 +95,8 @@ const Reader = {
         const content = document.getElementById('reader-content');
         content.scrollTop = book.scrollPosition || 0;
         this.updateProgress();
+        // 滚动模式不经过 recalcPages，在此处结束 loading toast
+        if (typeof App !== 'undefined') App.hideLoadingToast();
       };
       if (this._renderContentReady) {
         this._renderContentReady.then(restoreScroll);
@@ -1510,6 +1515,7 @@ const Reader = {
 
     // 字体变更会影响文字宽度，分页模式下需重算分页
     if (this._paginationMode) {
+      this._clearPageCache(); // 字体变化，清除持久化缓存
       clearTimeout(this._typoRecalcTimer);
       this._typoRecalcTimer = setTimeout(() => this.recalcPages(), 300);
     }
@@ -1583,6 +1589,14 @@ const Reader = {
     }
   },
 
+  // 清除当前书的分页布局缓存（排版参数变化时调用）
+  _clearPageCache() {
+    if (this._pageLayoutCache) {
+      Store.delete('pageCache', this._pageLayoutCache.key).catch(() => {});
+      this._pageLayoutCache = null;
+    }
+  },
+
   // 排版参数切换（供 HTML 按钮调用）
   setTypoParam(param, value, btn) {
     const varMap = {
@@ -1614,6 +1628,7 @@ const Reader = {
 
     // 分页模式下，字号/行高/页边距变更会影响多栏排版，需重算分页
     if (this._paginationMode) {
+      this._clearPageCache(); // 排版变化，清除持久化缓存
       clearTimeout(this._typoRecalcTimer);
       this._typoRecalcTimer = setTimeout(() => this.recalcPages(), 300);
     }
@@ -1774,6 +1789,7 @@ const Reader = {
       // 注意：不在此处直接设置 dual-page 类，完全交由 recalcPages 决定实际生效状态
       this._dualPageEffective = undefined;
       if (this._paginationMode) {
+        this._clearPageCache(); // 双页模式变化，清除持久化缓存
         // recalcPages 内部会根据屏幕尺寸决定实际生效状态、设置 dual-page 类并同步按钮
         this.recalcPages();
       } else {
@@ -1942,14 +1958,10 @@ const Reader = {
   },
 
   // 计算总页数（核心：正确处理 padding、单/双页）
-  recalcPages() {
+  async recalcPages() {
     const container = document.getElementById('reader-content');
     const wrapper = container.querySelector('.page-columns');
     if (!wrapper) return;
-
-    // 仅大文件（段落数 > 3000）显示重排提示，避免小文件也闪烁
-    // paraCount 在 rAF 外提前计算，rAF 回调通过闭包访问，不重复 querySelectorAll
-    const paraCount = wrapper.querySelectorAll('p, h1, h2, h3').length;
 
     // ── 自动降级：窄屏或竖屏时强制单页 ──
     const DUAL_MIN_WIDTH = 480;
@@ -1981,9 +1993,8 @@ const Reader = {
       cs.fontSize, cs.lineHeight, padL, padR
     ].join('|');
 
-    if (this._pageLayoutCache && this._pageLayoutCache.key === cacheKey) {
-      // 命中缓存：直接应用缓存的布局参数，跳过耗时的 rAF 重排
-      const c = this._pageLayoutCache;
+    // ── 优先检查内存缓存，再查 IndexedDB 持久化缓存 ──
+    const applyLayoutCache = (c) => {
       const pageGap = padL + padR;
       let contentH = container.clientHeight - padT - padB;
       contentH = Math.max(contentH, 120);
@@ -2011,10 +2022,28 @@ const Reader = {
       this._updatePageIndicator();
       this.updateProgress();
       requestAnimationFrame(() => { wrapper.style.transition = ''; });
+      if (typeof App !== 'undefined') App.hideLoadingToast();
+    };
+
+    if (this._pageLayoutCache && this._pageLayoutCache.key === cacheKey) {
+      // 命中内存缓存：直接应用，跳过耗时的 rAF 重排
+      applyLayoutCache(this._pageLayoutCache);
       return;
     }
 
-    if (paraCount > 3000 && typeof App !== 'undefined') App.showLoadingToast('正在重排…');
+    // 查 IndexedDB 持久化缓存
+    try {
+      const dbCache = await Store.get('pageCache', cacheKey);
+      if (dbCache) {
+        // 命中 IndexedDB 缓存：同步到内存并应用
+        this._pageLayoutCache = dbCache;
+        applyLayoutCache(dbCache);
+        return;
+      }
+    } catch (e) { /* IndexedDB 不可用时静默降级 */ }
+
+    // 未命中缓存，需要重排 —— 显示 loading toast
+    if (typeof App !== 'undefined') App.showLoadingToast('正在重排…');
 
     // ── 重排前：捕获当前页首行锚点 ──
     const anchor = this._captureAnchor();
@@ -2109,16 +2138,19 @@ const Reader = {
           this._currentPage = this._totalPages - 1;
         }
 
-        // 保存布局缓存（供下次同书同尺寸时快速恢复）
-        this._pageLayoutCache = {
+        // 保存布局缓存（内存 + IndexedDB 持久化，供下次同书同尺寸时快速恢复）
+        const cacheData = {
           key: cacheKey,
           pageWidth: this._pageWidth,
           totalPages: this._totalPages,
           exactContentW
         };
+        this._pageLayoutCache = cacheData;
+        // 异步写入 IndexedDB，不阻塞主线程
+        Store.put('pageCache', cacheData).catch(() => {});
 
         this.goToPage(this._currentPage);
-        if (paraCount > 3000 && typeof App !== 'undefined') App.hideLoadingToast();
+        if (typeof App !== 'undefined') App.hideLoadingToast();
         requestAnimationFrame(() => {
           wrapper.style.transition = '';
         });
