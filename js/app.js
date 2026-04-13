@@ -2,7 +2,7 @@
    APP.JS - 入口、tab 切换、全局初始化
    ═══════════════════════════════════════ */
 
-const APP_VERSION = '0.3.0-beta';
+const APP_VERSION = '0.3.1-beta';
 
 const App = {
   currentTab: 'shelf',

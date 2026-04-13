@@ -243,63 +243,19 @@ const Reader = {
       return;
     }
 
-    // EPUB 富文本模式：异步分批插入，避免一次性 innerHTML 阻塞主线程
+    // EPUB 富文本模式：用 DOMParser 解析后一次性 DocumentFragment 插入
+    // 注意：不使用 requestIdleCallback 分批，因为手机端繁忙时 rIC 会被严重推迟（可达数分钟）
     if (htmlContent) {
       container.classList.add('epub-content');
       container.classList.remove('txt-content');
       container.innerHTML = '';
 
-      // 用 DOMParser 在后台解析 HTML，不阻塞主线程渲染
       const parsed = new DOMParser().parseFromString(htmlContent, 'text/html');
-      const nodes = Array.from(parsed.body.childNodes);
-
-      const EPUB_CHUNK = 200; // 每批插入节点数（EPUB 节点比 TXT 段落复杂，批次更小）
-
-      if (nodes.length <= EPUB_CHUNK) {
-        // 小文件：一次性插入
-        const frag = document.createDocumentFragment();
-        nodes.forEach(n => frag.appendChild(document.importNode(n, true)));
-        container.appendChild(frag);
-        this._resolveEpubImages(this.currentBook ? this.currentBook.imageMap : null);
-        this._setupAnchorNav();
-      } else {
-        // 大文件：显示加载提示，分批插入
-        if (typeof App !== 'undefined') App.showLoadingToast('正在加载…');
-        const token = {};
-        this._renderCancelToken = token;
-        this._renderContentReady = new Promise(resolve => {
-          // 先插入首批，让用户尽快看到内容
-          const firstFrag = document.createDocumentFragment();
-          for (let i = 0; i < EPUB_CHUNK; i++) {
-            firstFrag.appendChild(document.importNode(nodes[i], true));
-          }
-          container.appendChild(firstFrag);
-
-          const insertChunk = (startIdx) => {
-            if (this._renderCancelToken !== token) { resolve(); return; }
-            const frag = document.createDocumentFragment();
-            const end = Math.min(startIdx + EPUB_CHUNK, nodes.length);
-            for (let i = startIdx; i < end; i++) {
-              frag.appendChild(document.importNode(nodes[i], true));
-            }
-            container.appendChild(frag);
-            if (end < nodes.length) {
-              if (typeof requestIdleCallback !== 'undefined') {
-                requestIdleCallback(() => insertChunk(end), { timeout: 500 });
-              } else {
-                setTimeout(() => insertChunk(end), 0);
-              }
-            } else {
-              // 全部插入完毕
-              if (typeof App !== 'undefined') App.hideLoadingToast();
-              this._resolveEpubImages(this.currentBook ? this.currentBook.imageMap : null);
-              this._setupAnchorNav();
-              resolve();
-            }
-          };
-          insertChunk(EPUB_CHUNK);
-        });
-      }
+      const frag = document.createDocumentFragment();
+      parsed.body.childNodes.forEach(n => frag.appendChild(document.importNode(n, true)));
+      container.appendChild(frag);
+      this._resolveEpubImages(this.currentBook ? this.currentBook.imageMap : null);
+      this._setupAnchorNav();
       return;
     }
 
