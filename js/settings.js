@@ -852,7 +852,7 @@ const Settings = {
     }
   },
 
-  // ─── 检查更新（清除旧版 SW 缓存，强制应用新版） ───
+  // ─── 检查更新（强制网络拉取最新 SW，有新版则应用并刷新） ───
   async checkUpdate() {
     const btn = document.getElementById('update-btn');
     const status = document.getElementById('update-status');
@@ -874,27 +874,26 @@ const Settings = {
         return;
       }
 
-      // 主动触发检查
+      // 监听 controllerchange：新 SW 接管后立即刷新页面
+      // 必须在 reg.update() 之前注册，避免竞态
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        window.location.reload();
+      }, { once: true });
+
+      // 主动触发 SW 检查（从网络拉取最新 sw.js）
       await reg.update();
 
-      // 判断是否有等待中的新版 SW
+      // reg.update() 完成后，检查是否有新 SW 在等待
       const newWorker = reg.installing || reg.waiting;
       if (newWorker) {
-        // 有新版本：让新 SW 立即接管，然后刷新
-        if (status) status.textContent = '发现新版本，正在更新…';
-        // 监听新 SW 状态，activated 后刷新
-        const applyUpdate = () => {
-          if (newWorker.state === 'activated') {
-            window.location.reload();
-          }
-        };
-        newWorker.addEventListener('statechange', applyUpdate);
-        // 发送 skipWaiting 指令
+        if (status) status.textContent = '发现新版本，正在应用…';
+        // 发送 skipWaiting，让新 SW 立即激活
+        // 激活后 controllerchange 事件触发，页面自动刷新
         newWorker.postMessage({ type: 'SKIP_WAITING' });
-        // 兜底：2s 后如未刷新则强制刷新
-        setTimeout(() => window.location.reload(), 2000);
+        // 兜底：3s 后如未刷新则强制刷新
+        setTimeout(() => window.location.reload(), 3000);
       } else {
-        // 当前已是最新版
+        // 当前已是最新版，移除 controllerchange 监听（{ once: true } 已自动移除）
         if (status) status.innerHTML = ver ? `✓ 已是最新版本（${ver}）` : '✓ 已是最新版本';
         if (btn) { btn.disabled = false; btn.textContent = '检查'; }
       }
