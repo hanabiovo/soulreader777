@@ -243,17 +243,63 @@ const Reader = {
       return;
     }
 
-    // EPUB 富文本模式：直接注入安全过滤后的 HTML
+    // EPUB 富文本模式：异步分批插入，避免一次性 innerHTML 阻塞主线程
     if (htmlContent) {
-      container.innerHTML = htmlContent;
       container.classList.add('epub-content');
       container.classList.remove('txt-content');
-      // 填充图片 src（用 imageMap 替换 data-epub-src 占位）
-      // 无论 imageMap 是否存在，都处理 img[data-epub-src]：
-      // 有 imageMap → 尝试填充；无 imageMap（旧书）→ 全部隐藏，避免 broken image
-      this._resolveEpubImages(this.currentBook ? this.currentBook.imageMap : null);
-      // 绑定文内锚点跳转
-      this._setupAnchorNav();
+      container.innerHTML = '';
+
+      // 用 DOMParser 在后台解析 HTML，不阻塞主线程渲染
+      const parsed = new DOMParser().parseFromString(htmlContent, 'text/html');
+      const nodes = Array.from(parsed.body.childNodes);
+
+      const EPUB_CHUNK = 200; // 每批插入节点数（EPUB 节点比 TXT 段落复杂，批次更小）
+
+      if (nodes.length <= EPUB_CHUNK) {
+        // 小文件：一次性插入
+        const frag = document.createDocumentFragment();
+        nodes.forEach(n => frag.appendChild(document.importNode(n, true)));
+        container.appendChild(frag);
+        this._resolveEpubImages(this.currentBook ? this.currentBook.imageMap : null);
+        this._setupAnchorNav();
+      } else {
+        // 大文件：显示加载提示，分批插入
+        if (typeof App !== 'undefined') App.showLoadingToast('正在加载…');
+        const token = {};
+        this._renderCancelToken = token;
+        this._renderContentReady = new Promise(resolve => {
+          // 先插入首批，让用户尽快看到内容
+          const firstFrag = document.createDocumentFragment();
+          for (let i = 0; i < EPUB_CHUNK; i++) {
+            firstFrag.appendChild(document.importNode(nodes[i], true));
+          }
+          container.appendChild(firstFrag);
+
+          const insertChunk = (startIdx) => {
+            if (this._renderCancelToken !== token) { resolve(); return; }
+            const frag = document.createDocumentFragment();
+            const end = Math.min(startIdx + EPUB_CHUNK, nodes.length);
+            for (let i = startIdx; i < end; i++) {
+              frag.appendChild(document.importNode(nodes[i], true));
+            }
+            container.appendChild(frag);
+            if (end < nodes.length) {
+              if (typeof requestIdleCallback !== 'undefined') {
+                requestIdleCallback(() => insertChunk(end), { timeout: 500 });
+              } else {
+                setTimeout(() => insertChunk(end), 0);
+              }
+            } else {
+              // 全部插入完毕
+              if (typeof App !== 'undefined') App.hideLoadingToast();
+              this._resolveEpubImages(this.currentBook ? this.currentBook.imageMap : null);
+              this._setupAnchorNav();
+              resolve();
+            }
+          };
+          insertChunk(EPUB_CHUNK);
+        });
+      }
       return;
     }
 
@@ -1948,22 +1994,15 @@ const Reader = {
     // 仅大文件（段落数 > 3000）显示重排提示，避免小文件也闪烁
     // paraCount 在 rAF 外提前计算，rAF 回调通过闭包访问，不重复 querySelectorAll
     const paraCount = wrapper.querySelectorAll('p, h1, h2, h3').length;
-    if (paraCount > 3000 && typeof App !== 'undefined') App.showLoadingToast('正在重排…');
 
     // ── 自动降级：窄屏或竖屏时强制单页 ──
-    // 阈值 480px：低于此宽度双页列太窄，阅读体验差
-    // 竖屏检测：优先用 screen.orientation（安卓 Chrome 更可靠），
-    //           回退到 screen.width/height（不受地址栏影响），
-    //           最后才用 innerHeight/innerWidth
     const DUAL_MIN_WIDTH = 480;
     const isNarrow = window.innerWidth < DUAL_MIN_WIDTH;
     const orientType = screen.orientation?.type ?? '';
     const isPortrait = orientType
       ? orientType.startsWith('portrait')
       : (window.screen.height > window.screen.width) || (window.innerHeight > window.innerWidth);
-    // _dualPageEffective：实际生效的双页状态（不修改用户持久化设置）
     const dualEffective = this._dualPage && !isNarrow && !isPortrait;
-    // 若实际生效状态与上次不同，同步 container 类名和按钮
     if (dualEffective !== this._dualPageEffective) {
       this._dualPageEffective = dualEffective;
       container.classList.toggle('dual-page', dualEffective);
@@ -1972,6 +2011,55 @@ const Reader = {
       });
     }
 
+    // ── 布局缓存：同书同尺寸同排版参数时跳过重排，直接恢复页码 ──
+    // 缓存 key = bookId + 视口尺寸 + 双页状态 + 字号/行高/边距 CSS 变量
+    const cs = getComputedStyle(container);
+    const padL = parseFloat(cs.paddingLeft) || 0;
+    const padR = parseFloat(cs.paddingRight) || 0;
+    const padT = parseFloat(cs.paddingTop) || 0;
+    const padB = parseFloat(cs.paddingBottom) || 0;
+    const cacheKey = [
+      this.currentBook ? this.currentBook.id : '',
+      window.innerWidth, window.innerHeight,
+      dualEffective ? 2 : 1,
+      cs.fontSize, cs.lineHeight, padL, padR
+    ].join('|');
+
+    if (this._pageLayoutCache && this._pageLayoutCache.key === cacheKey) {
+      // 命中缓存：直接应用缓存的布局参数，跳过耗时的 rAF 重排
+      const c = this._pageLayoutCache;
+      const pageGap = padL + padR;
+      let contentH = container.clientHeight - padT - padB;
+      contentH = Math.max(contentH, 120);
+
+      wrapper.style.transition = 'none';
+      wrapper.style.columnCount = dualEffective ? '2' : '1';
+      wrapper.style.columnWidth = '';
+      wrapper.style.columnGap = pageGap + 'px';
+      wrapper.style.height = contentH + 'px';
+      wrapper.style.width = c.exactContentW + 'px';
+      wrapper.style.marginLeft = 'auto';
+      wrapper.style.marginRight = 'auto';
+      wrapper.style.marginTop = '';
+      wrapper.style.marginBottom = '';
+      container.style.paddingLeft = '';
+      container.style.paddingRight = '';
+
+      this._pageWidth = c.pageWidth;
+      this._totalPages = c.totalPages;
+
+      // 直接跳到目标页（_currentPage 已在 open() 中设置）
+      const targetPage = Math.max(0, Math.min(this._currentPage, this._totalPages - 1));
+      this._currentPage = targetPage;
+      wrapper.style.transform = `translateX(-${targetPage * this._pageWidth}px)`;
+      this._updatePageIndicator();
+      this.updateProgress();
+      requestAnimationFrame(() => { wrapper.style.transition = ''; });
+      return;
+    }
+
+    if (paraCount > 3000 && typeof App !== 'undefined') App.showLoadingToast('正在重排…');
+
     // ── 重排前：捕获当前页首行锚点 ──
     const anchor = this._captureAnchor();
 
@@ -1979,22 +2067,9 @@ const Reader = {
     wrapper.style.transition = 'none';
 
     // ── 分页布局核心 ──
-    //
-    // 设计：#reader-content 保留 padding（视觉边距，用户可调）
-    //       .page-columns 在 padding-box 内，宽度 = contentW
-    //       column-width = contentW，column-gap = padL + padR
-    //       翻页步进 = contentW + gap = clientWidth（精确整数）
-    //
-    // 精确反推：column-gap > 0 时 scrollWidth = N*colW + (N-1)*gap
-    //   ⟹ scrollWidth + gap = N*(colW+gap) = N*_pageWidth
-    //   ⟹ N = round((scrollWidth+gap) / _pageWidth)
-    //   ⟹ 精确步进 = (scrollWidth+gap) / N
-    //
-    const cs = getComputedStyle(container);
-    const padL = parseFloat(cs.paddingLeft) || 0;
-    const padR = parseFloat(cs.paddingRight) || 0;
-    const padT = parseFloat(cs.paddingTop) || 0;
-    const padB = parseFloat(cs.paddingBottom) || 0;
+    const pageGap = padL + padR;
+    let contentH = container.clientHeight - padT - padB;
+    contentH = Math.max(contentH, 120);
 
     // 清除之前可能设置的 inline style（防止多次调用叠加）
     wrapper.style.marginLeft = '';
@@ -2006,23 +2081,16 @@ const Reader = {
     container.style.paddingRight = '';
 
     const contentW = Math.max(container.clientWidth - padL - padR, 100);
-    const pageGap = padL + padR;
-    let contentH = container.clientHeight - padT - padB;
-    contentH = Math.max(contentH, 120);
 
     if (dualEffective) {
-      // 双页：2 列可见，只设 column-count 让浏览器强制等宽平分，消除列宽舍入误差
       wrapper.style.columnCount = '2';
-      wrapper.style.columnWidth = '';   // 不设 column-width，避免浏览器"建议值"舍入
+      wrapper.style.columnWidth = '';
       wrapper.style.columnGap = pageGap + 'px';
-      // 预估步进（rAF 后精确反推）
       this._pageWidth = contentW + pageGap;
     } else {
-      // 单页：只设 column-count，浏览器强制单列填满容器，无舍入问题
       wrapper.style.columnCount = '1';
-      wrapper.style.columnWidth = '';   // 不设 column-width，避免浏览器"建议值"舍入
+      wrapper.style.columnWidth = '';
       wrapper.style.columnGap = pageGap + 'px';
-      // 预估步进（rAF 后精确反推）
       this._pageWidth = contentW + pageGap;
     }
 
@@ -2033,22 +2101,17 @@ const Reader = {
       requestAnimationFrame(() => {
         const sw = wrapper.scrollWidth;
         const gap = pageGap;
-        // scrollWidth + gap = N * (colW + gap) = N * _pageWidth
         const N = Math.max(1, Math.round((sw + gap) / this._pageWidth));
-        // 对齐到物理像素，防止 translateX 在高 DPI 屏触发亚像素合成层偏移
         const dpr = window.devicePixelRatio || 1;
         this._pageWidth = Math.round(((sw + gap) / N) * dpr) / dpr;
         this._totalPages = N;
 
-        // 用精确的 _pageWidth 反算 contentW，强制设为 wrapper 宽度并居中
-        // 这样每次 translateX 步进都是物理像素整数倍，且内容始终视觉居中
         const exactContentW = this._pageWidth - gap;
         wrapper.style.width = exactContentW + 'px';
         wrapper.style.marginLeft = 'auto';
         wrapper.style.marginRight = 'auto';
 
         // ── 重排后：按字符偏移恢复页码（简化版 CFI） ──
-        // 先将 wrapper 归零（translateX=0），使 getBoundingClientRect 直接反映列坐标
         wrapper.style.transform = 'translateX(0)';
         this._currentPage = 0;
 
@@ -2056,7 +2119,6 @@ const Reader = {
           if (anchor.charOffset === 0) {
             this._currentPage = 0;
           } else {
-            // 重新遍历文本节点，累加到 charOffset，找对应节点的新页码
             const walker2 = document.createTreeWalker(wrapper, NodeFilter.SHOW_TEXT, {
               acceptNode(node) {
                 return node.nodeValue && node.nodeValue.trim()
@@ -2069,12 +2131,10 @@ const Reader = {
             while ((tn = walker2.nextNode())) {
               const len = tn.nodeValue.length;
               if (accumulated + len > anchor.charOffset) {
-                // 找到目标节点，用 getBoundingClientRect 定位新页码
-                // wrapper 已归零，_currentPage=0，_elColumnLeft 直接返回列绝对坐标
                 const parent = tn.parentElement;
                 if (parent) {
-                   const elLeft = this._elColumnLeft(parent, wrapper);
-                   const newPage = Math.floor(elLeft / this._pageWidth);
+                  const elLeft = this._elColumnLeft(parent, wrapper);
+                  const newPage = Math.floor(elLeft / this._pageWidth);
                   this._currentPage = Math.max(0, Math.min(newPage, this._totalPages - 1));
                   found = true;
                 }
@@ -2087,17 +2147,22 @@ const Reader = {
             }
           }
         } else if (anchor && anchor.ratio != null) {
-          // 降级：比例方案
           const newPage = Math.round(anchor.ratio * this._totalPages);
           this._currentPage = Math.max(0, Math.min(newPage, this._totalPages - 1));
         } else if (this._currentPage >= this._totalPages) {
           this._currentPage = this._totalPages - 1;
         }
 
-        // 无动画跳到当前页，再恢复 transition
+        // 保存布局缓存（供下次同书同尺寸时快速恢复）
+        this._pageLayoutCache = {
+          key: cacheKey,
+          pageWidth: this._pageWidth,
+          totalPages: this._totalPages,
+          exactContentW
+        };
+
         this.goToPage(this._currentPage);
         if (paraCount > 3000 && typeof App !== 'undefined') App.hideLoadingToast();
-        // 下一帧恢复动画，以便用户手动翻页时有过渡效果
         requestAnimationFrame(() => {
           wrapper.style.transition = '';
         });
@@ -2231,8 +2296,24 @@ const Reader = {
       if (y < top || y > bottom) return;
       const w = window.innerWidth;
       const x = t.clientX;
-      if (x < w * 0.3) this.prevPage();
-      else if (x > w * 0.7) this.nextPage();
+      if (x < w * 0.3) {
+        // 标记本次 touch 已处理翻页，阻止后续模拟 mouseup 重复触发
+        this._tapTouchHandled = true;
+        this.prevPage();
+      } else if (x > w * 0.7) {
+        this._tapTouchHandled = true;
+        this.nextPage();
+      }
+    };
+
+    // mouseup 检查 touch 标志，避免手机端 touch→mouse 模拟事件导致翻两页
+    const origMouseUp = this._tapMouseUp;
+    this._tapMouseUp = (e) => {
+      if (this._tapTouchHandled) {
+        this._tapTouchHandled = false;
+        return;
+      }
+      origMouseUp(e);
     };
 
     overlay.addEventListener('mousedown', this._tapMouseDown);
