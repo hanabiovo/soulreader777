@@ -67,26 +67,47 @@ const Reader = {
     
     // ─── EPUB / TXT 文本模式 ───
     // 渲染内容（优先使用 htmlContent 富文本）
+    // renderContent 对大 TXT 文件会异步分块插入，通过 _renderContentReady Promise 通知完成
+    this._renderContentReady = null; // 重置
+    this._renderCancelToken = null;  // 重置取消令牌（新 open 使旧分块渲染自动停止）
     this.renderContent(book.content, book.htmlContent);
     
     // 应用分页模式（如果已开启）
     if (this._paginationMode) {
       // 设置待恢复的页码，enablePagination → recalcPages 完成后会 goToPage
       this._currentPage = book.currentPage || 0;
-      this.enablePagination();
+      // 等待内容完全插入后再启用分页，避免大 TXT 分块渲染时 recalcPages 计算不准
+      if (this._renderContentReady) {
+        this._renderContentReady.then(() => this.enablePagination());
+      } else {
+        this.enablePagination();
+      }
     } else {
       // 滚动模式：绑定滚动监听并恢复位置
       this._scrollHandler = () => this.updateProgress();
       document.getElementById('reader-content').addEventListener('scroll', this._scrollHandler, { passive: true });
-      setTimeout(() => {
+      // 大 TXT 分块渲染时，需等全部内容插入后再恢复 scrollTop，
+      // 否则 scrollHeight 不足会导致位置被截断（偏上）
+      const restoreScroll = () => {
         const content = document.getElementById('reader-content');
         content.scrollTop = book.scrollPosition || 0;
         this.updateProgress();
-      }, 100);
+      };
+      if (this._renderContentReady) {
+        this._renderContentReady.then(restoreScroll);
+      } else {
+        setTimeout(restoreScroll, 100);
+      }
     }
 
     // 恢复高亮
-    await this.restoreHighlights(bookId);
+    // 大 TXT 分块渲染时，需等全部内容插入后再恢复高亮，
+    // 否则后续分块中的笔记引文文本节点尚未存在，高亮会静默丢失
+    if (this._renderContentReady) {
+      this._renderContentReady.then(() => this.restoreHighlights(bookId));
+    } else {
+      await this.restoreHighlights(bookId);
+    }
   },
 
   // ─── 关闭阅读器 ───
@@ -125,6 +146,10 @@ const Reader = {
       this._removeSwipeGesture();
       this._removeTapZones();
       this._removeWheelNav();
+      // 清理懒加载 observer、dataUrl Map 和页面节点缓存
+      this._destroyPdfLazyLoad();
+      this._pdfSrcMap = null;
+      this._pdfPageEls = null;
       if (this._themeObserver) {
         this._themeObserver.disconnect();
         this._themeObserver = null;
@@ -176,6 +201,11 @@ const Reader = {
     document.getElementById('toc-panel').classList.remove('active');
     document.getElementById('toc-backdrop').classList.remove('active');
     
+    // 取消进行中的 TXT 分块渲染：替换令牌使旧闭包检测到不一致后停止插入
+    // 同时清空 _renderContentReady，防止 .then() 回调在关闭后执行副作用
+    this._renderCancelToken = {};
+    this._renderContentReady = null;
+
     this.currentBook = null;
     this.currentNoteId = null;
     this._isPdf = false;
@@ -225,42 +255,164 @@ const Reader = {
     }
 
     // TXT / 纯文本模式
+    // 优化：超大文件（>5 万段落）分块插入，避免单次 innerHTML 长时间阻塞主线程
     container.classList.add('txt-content');
     container.classList.remove('epub-content');
+    container.innerHTML = '';
+
     const paragraphs = content.split(/\n+/).filter(p => p.trim());
-    const html = paragraphs.map(p => {
+
+    // 将段落转换为 DOM 节点的辅助函数
+    const makeParagraphNode = (p) => {
       const trimmed = p.trim();
-      // 识别标题（以 # 开头）：先切割原始文本再转义，避免转义后 slice 截断 HTML 实体
-      if (trimmed.startsWith('### ')) return `<h3>${this.escapeHtml(trimmed.slice(4))}</h3>`;
-      if (trimmed.startsWith('## '))  return `<h2>${this.escapeHtml(trimmed.slice(3))}</h2>`;
-      if (trimmed.startsWith('# '))   return `<h1>${this.escapeHtml(trimmed.slice(2))}</h1>`;
-      const escaped = this.escapeHtml(trimmed);
-      // 识别中文章节标题（复用 _tocPatterns）
-      if (this._tocPatterns.some(re => re.test(trimmed))) {
-        return `<h2 class="chapter-title">${escaped}</h2>`;
+      let el;
+      if (trimmed.startsWith('### ')) {
+        el = document.createElement('h3');
+        el.textContent = trimmed.slice(4);
+      } else if (trimmed.startsWith('## ')) {
+        el = document.createElement('h2');
+        el.textContent = trimmed.slice(3);
+      } else if (trimmed.startsWith('# ')) {
+        el = document.createElement('h1');
+        el.textContent = trimmed.slice(2);
+      } else if (this._tocPatterns.some(re => re.test(trimmed))) {
+        el = document.createElement('h2');
+        el.className = 'chapter-title';
+        el.textContent = trimmed;
+      } else {
+        el = document.createElement('p');
+        if (/^["'"'「『【]/.test(trimmed)) el.className = 'dialogue';
+        el.textContent = trimmed;
       }
-      const isDialogue = /^["'"'「『【]/.test(trimmed);
-      return `<p${isDialogue ? ' class="dialogue"' : ''}>${escaped}</p>`;
-    }).join('');
-    
-    container.innerHTML = html;
+      return el;
+    };
+
+    // 分块阈值：超过 800 段时启用分块渲染，避免一次性插入数万节点卡顿
+    const CHUNK_SIZE = 800;
+    if (paragraphs.length <= CHUNK_SIZE) {
+      // 小文件：一次性用 DocumentFragment 插入，同步完成，无需 Promise
+      const frag = document.createDocumentFragment();
+      paragraphs.forEach(p => frag.appendChild(makeParagraphNode(p)));
+      container.appendChild(frag);
+      // _renderContentReady 保持 null，open() 中直接调用 enablePagination
+    } else {
+      // 大文件：先渲染首屏（前 CHUNK_SIZE 段），其余用 requestIdleCallback 分批插入
+      // 通过 _renderContentReady Promise 通知 open() 等待全部内容插入完成后再分页
+      // 取消令牌：close() 或新 open() 时将 _renderCancelToken 置为新对象，
+      // 旧闭包持有旧 token 引用，检测到不一致时立即停止插入，避免向已清空的容器写入
+      const token = {};
+      this._renderCancelToken = token;
+      this._renderContentReady = new Promise(resolve => {
+        const firstFrag = document.createDocumentFragment();
+        for (let i = 0; i < CHUNK_SIZE; i++) {
+          firstFrag.appendChild(makeParagraphNode(paragraphs[i]));
+        }
+        container.appendChild(firstFrag);
+
+        // 分批插入剩余段落，每批 CHUNK_SIZE 段，利用空闲时间避免阻塞交互
+        const insertChunk = (startIdx) => {
+          // 若令牌已被替换（close 或新 open），停止插入并 resolve（不再阻塞等待方）
+          if (this._renderCancelToken !== token) { resolve(); return; }
+          const frag = document.createDocumentFragment();
+          const end = Math.min(startIdx + CHUNK_SIZE, paragraphs.length);
+          for (let i = startIdx; i < end; i++) {
+            frag.appendChild(makeParagraphNode(paragraphs[i]));
+          }
+          container.appendChild(frag);
+          if (end < paragraphs.length) {
+            // 优先用 requestIdleCallback（低优先级），降级到 setTimeout(0)
+            if (typeof requestIdleCallback !== 'undefined') {
+              requestIdleCallback(() => insertChunk(end), { timeout: 500 });
+            } else {
+              setTimeout(() => insertChunk(end), 0);
+            }
+          } else {
+            // 全部段落插入完毕，通知等待方
+            resolve();
+          }
+        };
+        insertChunk(CHUNK_SIZE);
+      });
+    }
   },
 
   // ─── 渲染 PDF（canvas 分页模式） ───
+  // 优化：初始只渲染占位 div，通过 IntersectionObserver 懒加载图片
+  // dataUrl 存在 JS 闭包 Map 中（而非 DOM dataset），加载后立即从 Map 删除释放内存
   renderPdfContent(pdfPages) {
     const container = document.getElementById('reader-content');
     container.classList.remove('epub-content', 'txt-content');
     container.classList.add('pdf-content');
 
-    // 生成所有页面的 <img>，每页一张
-    // .pdf-page-inner 包裹 img + text layer，确保 text layer 的 left:0 相对于 img 左边缘
-    container.innerHTML = pdfPages.map((dataUrl, i) =>
-      `<div class="pdf-page" data-page="${i}">` +
-        `<div class="pdf-page-inner">` +
-          `<img src="${dataUrl}" alt="第 ${i + 1} 页" draggable="false">` +
-        `</div>` +
-      `</div>`
-    ).join('');
+    // 用 JS Map 存储 dataUrl，key = 页面索引（数字），避免将大字符串写入 DOM 属性
+    // 加载后从 Map 中 delete，让 GC 尽早回收已显示页面的 base64 字符串
+    this._pdfSrcMap = new Map(pdfPages.map((url, i) => [i, url]));
+
+    // 用 DocumentFragment 批量插入，减少重排次数
+    const frag = document.createDocumentFragment();
+    pdfPages.forEach((_, i) => {
+      const pageDiv = document.createElement('div');
+      pageDiv.className = 'pdf-page';
+      pageDiv.dataset.page = i; // 只存索引，不存 dataUrl
+
+      const inner = document.createElement('div');
+      inner.className = 'pdf-page-inner';
+
+      const img = document.createElement('img');
+      img.alt = `第 ${i + 1} 页`;
+      img.draggable = false;
+      // 初始不设 src，避免浏览器立即解码所有大图
+      inner.appendChild(img);
+      pageDiv.appendChild(inner);
+      frag.appendChild(pageDiv);
+    });
+    container.innerHTML = '';
+    container.appendChild(frag);
+
+    // 用 IntersectionObserver 懒加载：进入视口前后 2 屏时预加载图片
+    this._setupPdfLazyLoad(container);
+  },
+
+  // ─── PDF 图片懒加载（IntersectionObserver） ───
+  _setupPdfLazyLoad(container) {
+    // 清理旧的 observer
+    if (this._pdfImgObserver) {
+      this._pdfImgObserver.disconnect();
+      this._pdfImgObserver = null;
+    }
+
+    this._pdfImgObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const pageDiv = entry.target;
+        const idx = parseInt(pageDiv.dataset.page, 10);
+        // 从 JS Map 取 dataUrl（而非 DOM dataset），取完即删，释放内存
+        const src = this._pdfSrcMap && this._pdfSrcMap.get(idx);
+        if (!src) return; // 已加载过，跳过
+        const img = pageDiv.querySelector('img');
+        if (img) img.src = src;
+        // 加载后从 Map 中删除，让 GC 回收该 base64 字符串
+        this._pdfSrcMap.delete(idx);
+        this._pdfImgObserver.unobserve(pageDiv);
+      });
+    }, {
+      root: container,
+      // 提前 200% 视口高度预加载，确保翻页流畅
+      rootMargin: '200% 0px 200% 0px',
+      threshold: 0
+    });
+
+    container.querySelectorAll('.pdf-page').forEach(page => {
+      this._pdfImgObserver.observe(page);
+    });
+  },
+
+  // ─── 清理 PDF 懒加载 observer ───
+  _destroyPdfLazyLoad() {
+    if (this._pdfImgObserver) {
+      this._pdfImgObserver.disconnect();
+      this._pdfImgObserver = null;
+    }
   },
 
   // ─── PDF：缓存文档对象 ───
@@ -329,16 +481,39 @@ const Reader = {
     }
   },
 
+  // ─── PDF：强制加载指定页图片（分页模式下 display:none 不触发 IntersectionObserver） ───
+  _ensurePdfPageImgLoaded(idx) {
+    if (!this._pdfSrcMap || !this._pdfSrcMap.has(idx)) return; // 已加载或无数据
+    const pages = this._pdfPageEls;
+    const pageDiv = pages && pages[idx];
+    if (!pageDiv) return;
+    const img = pageDiv.querySelector('img');
+    if (img && !img.src) {
+      img.src = this._pdfSrcMap.get(idx);
+    }
+    this._pdfSrcMap.delete(idx);
+    // 同时停止 observer 对该页的观察（若 observer 仍存在）
+    if (this._pdfImgObserver) this._pdfImgObserver.unobserve(pageDiv);
+  },
+
   // ─── PDF：显示指定页（滚动到对应位置 或 分页模式切换） ───
+  // 优化：使用缓存的页面节点数组 _pdfPageEls，避免每次 querySelectorAll
   _showPdfPage(pageIndex) {
     const container = document.getElementById('reader-content');
-    const pages = container.querySelectorAll('.pdf-page');
+    // 使用缓存的页面节点数组；若缓存失效则重建
+    if (!this._pdfPageEls || this._pdfPageEls.length === 0) {
+      this._pdfPageEls = Array.from(container.querySelectorAll('.pdf-page'));
+    }
+    const pages = this._pdfPageEls;
     if (!pages[pageIndex]) return;
 
     if (this._paginationMode) {
       if (this._dualPage) {
         // 双页模式：对齐到偶数索引，同时显示两页
         if (pageIndex % 2 !== 0) pageIndex = Math.max(0, pageIndex - 1);
+        // 分页模式下 display:none 的页面不触发 IntersectionObserver，需手动确保图片已加载
+        this._ensurePdfPageImgLoaded(pageIndex);
+        if (pageIndex + 1 < pages.length) this._ensurePdfPageImgLoaded(pageIndex + 1);
         pages.forEach((p, i) => {
           p.style.display = (i === pageIndex || i === pageIndex + 1) ? '' : 'none';
         });
@@ -347,6 +522,8 @@ const Reader = {
         if (pageIndex + 1 < pages.length) this._renderPdfTextLayer(pageIndex + 1);
       } else {
         // 单页模式：隐藏所有页，只显示目标页
+        // 分页模式下 display:none 的页面不触发 IntersectionObserver，需手动确保图片已加载
+        this._ensurePdfPageImgLoaded(pageIndex);
         pages.forEach((p, i) => {
           p.style.display = i === pageIndex ? '' : 'none';
         });
@@ -396,10 +573,14 @@ const Reader = {
   },
 
   // ─── PDF：滚动监听（自动检测当前可见页） ───
+  // 优化：缓存页面节点数组 _pdfPageEls，避免每次 scroll 触发 querySelectorAll
   _setupPdfScrollNav() {
     const container = document.getElementById('reader-content');
+    // 建立/刷新页面节点缓存
+    this._pdfPageEls = Array.from(container.querySelectorAll('.pdf-page'));
+
     this._pdfScrollHandler = () => {
-      const pages = container.querySelectorAll('.pdf-page');
+      const pages = this._pdfPageEls;
       if (!pages.length) return;
 
       const containerTop = container.scrollTop;
@@ -484,8 +665,9 @@ const Reader = {
       this._showPdfPage(this._pdfCurrentPage);
     } else {
       container.classList.remove('pdf-paginated', 'pdf-dual-page');
-      // 显示所有页
-      container.querySelectorAll('.pdf-page').forEach(p => {
+      // 显示所有页（使用缓存节点数组，避免 querySelectorAll）
+      const allPages = this._pdfPageEls || Array.from(container.querySelectorAll('.pdf-page'));
+      allPages.forEach(p => {
         p.style.display = '';
       });
       // 移除翻页触摸区和滚轮翻页
@@ -503,6 +685,7 @@ const Reader = {
   },
 
   // ─── 恢复高亮 ───
+  // 优化：构建"首字符 → 文本节点列表"的 Map 索引，将 O(notes × nodes) 降为近似 O(notes)
   async restoreHighlights(bookId) {
     const notes = await Store.getAll('notes');
     const bookNotes = notes.filter(n => n.bookId === bookId && n.quote);
@@ -514,8 +697,23 @@ const Reader = {
     let node;
     while ((node = walker.nextNode())) textNodes.push(node);
 
+    // 构建首字符索引：Map<firstChar, TextNode[]>
+    // 大多数笔记引文首字符唯一，可将候选节点从全量缩减到极少数
+    const firstCharMap = new Map();
+    for (const tn of textNodes) {
+      const val = tn.nodeValue;
+      if (!val) continue;
+      const ch = val[0];
+      if (!firstCharMap.has(ch)) firstCharMap.set(ch, []);
+      firstCharMap.get(ch).push(tn);
+    }
+
     bookNotes.forEach(note => {
-      for (const tn of textNodes) {
+      if (!note.quote) return;
+      const firstChar = note.quote[0];
+      // 优先在首字符匹配的候选节点中查找；若未命中则回退全量扫描
+      const candidates = firstCharMap.get(firstChar) || textNodes;
+      for (const tn of candidates) {
         const idx = tn.nodeValue.indexOf(note.quote);
         if (idx !== -1) {
           try {
@@ -547,6 +745,17 @@ const Reader = {
   // ─── 显示目录 ───
   showTOC() {
     document.getElementById('toc-backdrop').classList.add('active');
+    // 大 TXT 分块渲染时，若内容尚未全部插入则先等待，再扫描目录
+    // 避免后半部分章节标题缺失
+    if (this._renderContentReady) {
+      this._renderContentReady.then(() => this._buildAndShowTOC());
+    } else {
+      this._buildAndShowTOC();
+    }
+  },
+
+  // ─── 目录构建与显示（内部实现，由 showTOC 调用） ───
+  _buildAndShowTOC() {
     const panel = document.getElementById('toc-panel');
     const list = document.getElementById('toc-list');
     const container = document.getElementById('reader-content');
@@ -1470,7 +1679,13 @@ const Reader = {
     if (this._isPdf) {
       this._togglePdfPagination(mode);
     } else if (mode) {
-      this.enablePagination();
+      // 若大 TXT 分块渲染仍在进行，等待全部内容插入后再启用分页，
+      // 避免 recalcPages 在内容不完整时计算出偏少的总页数
+      if (this._renderContentReady) {
+        this._renderContentReady.then(() => this.enablePagination());
+      } else {
+        this.enablePagination();
+      }
     } else {
       this.disablePagination();
     }
