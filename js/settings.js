@@ -184,6 +184,12 @@ const Settings = {
     this.setTheme(this.theme === 'dark' ? 'light' : 'dark');
   },
 
+  // 同步更新 <meta name="theme-color">，让手机状态栏跟随主题色
+  _syncThemeColor(isDark) {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', isDark ? '#141412' : '#f7f5f0');
+  },
+
   _applyTheme() {
     // 清除旧的 system listener
     if (this._mql) {
@@ -195,15 +201,20 @@ const Settings = {
       this._mql = window.matchMedia('(prefers-color-scheme: dark)');
       this._mqlHandler = (e) => {
         document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+        this._syncThemeColor(e.matches);
         // 系统明暗切换时，清除阅读器配色 override（软性联动）
         if (typeof Reader !== 'undefined') Reader.clearReadColorOverride();
       };
       this._mql.addEventListener('change', this._mqlHandler);
-      document.documentElement.setAttribute('data-theme', this._mql.matches ? 'dark' : 'light');
+      const isDark = this._mql.matches;
+      document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      this._syncThemeColor(isDark);
     } else if (this.theme === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');
+      this._syncThemeColor(true);
     } else {
       document.documentElement.setAttribute('data-theme', 'light');
+      this._syncThemeColor(false);
     }
   },
 

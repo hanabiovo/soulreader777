@@ -1439,7 +1439,7 @@ const Reader = {
     const orientType2 = screen.orientation?.type ?? '';
     const isPortraitNow = orientType2
       ? orientType2.startsWith('portrait')
-      : (window.screen.height > window.screen.width) || (window.innerHeight > window.innerWidth);
+      : window.screen.height > window.screen.width;
     const canDual = !isPortraitNow && window.innerWidth >= 480;
     const effectiveDual = this._dualPageEffective ?? this._dualPage;
     document.querySelectorAll('.typo-btn[data-param="columns"]').forEach(btn => {
@@ -1780,7 +1780,7 @@ const Reader = {
       // EPUB/TXT：先检查当前屏幕是否允许双页
       const ot = screen.orientation?.type ?? '';
       const portrait = ot ? ot.startsWith('portrait')
-        : (window.screen.height > window.screen.width) || (window.innerHeight > window.innerWidth);
+        : window.screen.height > window.screen.width;
       if (dual && (portrait || window.innerWidth < 480)) {
         // 竖屏或窄屏：忽略切换请求，不修改持久化设置
         return;
@@ -1969,7 +1969,7 @@ const Reader = {
     const orientType = screen.orientation?.type ?? '';
     const isPortrait = orientType
       ? orientType.startsWith('portrait')
-      : (window.screen.height > window.screen.width) || (window.innerHeight > window.innerWidth);
+      : window.screen.height > window.screen.width;
     const dualEffective = this._dualPage && !isNarrow && !isPortrait;
     if (dualEffective !== this._dualPageEffective) {
       this._dualPageEffective = dualEffective;

@@ -38,22 +38,6 @@
   }
 }
 
-/* ─── Window Controls Overlay 拖拽区域 ───
-   书架顶部控制栏作为可拖拽标题栏区域 */
-#shelf-controls {
-  -webkit-app-region: drag;
-  app-region: drag;
-}
-
-/* 书架控制栏内的所有可点击元素排除拖拽 */
-#shelf-controls button,
-#shelf-controls .view-toggle-btn,
-#shelf-sort,
-#shelf-actions {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-}
-
 /* 底部导航 - 灵感之海风格 */
 #tab-bar {
   position: fixed;
