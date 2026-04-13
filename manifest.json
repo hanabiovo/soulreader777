@@ -5,6 +5,7 @@
   "start_url": "/soulreader777/",
   "scope": "/soulreader777/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
   "background_color": "#f7f5f0",
   "theme_color": "#f7f5f0",
   "orientation": "portrait",

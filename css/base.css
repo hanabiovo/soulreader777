@@ -31,6 +31,12 @@
   --cover-bg:      #faf8f3;
   --cover-border:  #e8e5de;
   --cover-spine:   #dedad4;
+
+  /* Window Controls Overlay - PWA 无边框标题栏适配
+     WCO 激活时由浏览器注入真实值，否则回退到 0px */
+  --wco-top:   env(titlebar-area-height, 0px);
+  --wco-left:  env(titlebar-area-x, 0px);
+  --wco-width: env(titlebar-area-width, 100%);
 }
 
 /* 暗色模式 */
@@ -61,7 +67,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding-top: max(10px, env(safe-area-inset-top));
+  /* WCO 激活时顶部留出标题栏高度；普通模式回退到 safe-area 或 10px */
+  padding-top: max(10px, env(titlebar-area-height, env(safe-area-inset-top, 0px)));
   transition: background 0.5s ease, color 0.5s ease;
 }
 

@@ -17,7 +17,8 @@
   display: flex;
 }
 
-/* 顶部 Header - 48px */
+/* 顶部 Header - 48px
+   WCO 模式下作为可拖拽标题栏，宽度自动避开右上角系统按钮 */
 #reader-header {
   height: 48px;
   display: flex;
@@ -26,6 +27,20 @@
   padding: 0 16px;
   position: relative;
   flex-shrink: 0;
+  /* WCO：标题栏区域可拖拽移动窗口 */
+  -webkit-app-region: drag;
+  app-region: drag;
+  /* WCO：右侧宽度自动避开系统按钮（最小化/最大化/关闭）
+     非 WCO 模式下 env() 回退为 100%，无影响 */
+  width: env(titlebar-area-width, 100%);
+}
+
+/* 阅读器 header 内所有可点击元素排除拖拽 */
+#reader-back,
+#reader-actions,
+.reader-action-btn {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 /* 返回箭头 - 细 SVG */
