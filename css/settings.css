@@ -622,6 +622,36 @@
   line-height: 1.6;
 }
 
+/* 字体文件上传行 */
+.font-file-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.font-file-label {
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  border: 1px dashed var(--rule);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  transition: border-color 0.2s, color 0.2s;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.font-file-label:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
 /* 字体方案命名弹窗 */
 #font-scheme-name-overlay {
   position: fixed;

@@ -478,6 +478,21 @@
             <div class="font-lib-title">字体库</div>
             <div class="font-lib-list" id="font-lib-list"></div>
             <div class="font-custom-section">
+                <div class="font-custom-label">上传本地字体文件</div>
+                <div class="font-file-row">
+                    <label class="font-file-label" for="font-file-input">
+                        <span id="font-file-label-text">选择字体文件…</span>
+                    </label>
+                    <input type="file" id="font-file-input" accept=".ttf,.otf,.woff,.woff2"
+                        style="display:none"
+                        onchange="document.getElementById('font-file-label-text').textContent=this.files[0]?.name||'选择字体文件…'">
+                    <input class="font-name-input" id="font-file-name-input" type="text"
+                        placeholder="字体名称（选填）">
+                    <button class="font-url-add-btn" onclick="Settings.addCustomFontFile()">添加</button>
+                </div>
+                <div class="font-custom-hint">支持 .ttf / .otf / .woff / .woff2，字体数据存储在本地设备</div>
+            </div>
+            <div class="font-custom-section" style="margin-top:10px;">
                 <div class="font-custom-label">添加外链字体</div>
                 <textarea class="font-url-input" id="font-url-input" rows="3"
                     placeholder="粘贴字体 CSS 代码或直接填 URL…"></textarea>

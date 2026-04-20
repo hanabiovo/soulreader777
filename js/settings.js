@@ -103,6 +103,27 @@ function loadFontUrl(url) {
   document.head.appendChild(link);
 }
 
+// ─── 本地字体注入（@font-face DataURL，去重）───
+const _injectedLocalFonts = new Set();
+function injectLocalFont(fontId, family, dataUrl) {
+  if (_injectedLocalFonts.has(fontId)) return;
+  _injectedLocalFonts.add(fontId);
+  const style = document.createElement('style');
+  style.id = `local-font-${fontId}`;
+  style.textContent = `@font-face { font-family: '${family}'; src: url('${dataUrl}'); }`;
+  document.head.appendChild(style);
+}
+
+// ─── 从 IndexedDB 加载所有本地字体并注入 ───
+async function loadLocalFontsFromDB() {
+  try {
+    const records = await Store.getAll('fonts');
+    records.forEach(r => injectLocalFont(r.id, r.family, r.dataUrl));
+  } catch(e) {
+    console.warn('loadLocalFontsFromDB 失败', e);
+  }
+}
+
 function saveFontSettings() {
   localStorage.setItem('lingxi_fonts', JSON.stringify(fontSettings));
 }
@@ -138,6 +159,8 @@ const Settings = {
     // 字体系统初始化：预加载预设 + 用户字体，应用当前设置，渲染 UI
     FONT_PRESETS.forEach(f => { if (f.url) loadFontUrl(f.url); });
     (fontSettings.customFonts || []).forEach(f => { if (f.url) loadFontUrl(f.url); });
+    // 加载本地字体文件（IndexedDB）
+    loadLocalFontsFromDB();
     applyFontSettings();
     this.renderFontSettings();
     // 封面风格初始化，默认方案 C
@@ -532,13 +555,13 @@ const Settings = {
       <div class="font-lib-item">
         <div class="font-lib-item-info">
           <span class="font-lib-item-name" style="font-family:${f.title||f.ui}">${App.escapeHtml(f.label)}</span>
-          <span class="font-lib-item-url">${App.escapeHtml(f.url)}</span>
+          <span class="font-lib-item-url">${f.local ? '📁 本地字体文件' : App.escapeHtml(f.url||'')}</span>
         </div>
         <button class="font-lib-item-del" onclick="Settings.deleteCustomFont('${f.id}')">删除</button>
       </div>`).join('');
   },
 
-  // ── 添加自定义字体 ──
+  // ── 添加外链自定义字体 ──
   addCustomFont() {
     const inputEl = document.getElementById('font-url-input');
     const nameEl  = document.getElementById('font-name-input');
@@ -587,8 +610,73 @@ const Settings = {
     App.showToast(`字体「${label}」已添加`);
   },
 
+  // ── 添加本地字体文件 ──
+  addCustomFontFile() {
+    const fileInput = document.getElementById('font-file-input');
+    const nameEl    = document.getElementById('font-file-name-input');
+    const file = fileInput?.files?.[0];
+    if (!file) { App.showToast('请先选择字体文件'); return; }
+
+    const allowedExts = ['ttf','otf','woff','woff2'];
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!allowedExts.includes(ext)) {
+      App.showToast('仅支持 .ttf / .otf / .woff / .woff2 格式');
+      return;
+    }
+
+    // 从文件名推断字体名
+    const guessedName = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+    const label = nameEl?.value.trim() || guessedName;
+    if (!label) { App.showToast('请填写字体名称'); if (nameEl) nameEl.focus(); return; }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target.result;
+      const id = 'lf_' + Date.now();
+      const family = label;
+      const fontValue = `'${family}',sans-serif`;
+      const newFont = { id, label, url: null, local: true, ui: fontValue, body: fontValue, title: fontValue };
+
+      // 存入 IndexedDB
+      try {
+        await Store.put('fonts', { id, family, dataUrl });
+      } catch(err) {
+        App.showToast('字体文件存储失败，请重试');
+        console.error(err);
+        return;
+      }
+
+      // 注入 @font-face
+      injectLocalFont(id, family, dataUrl);
+
+      // 更新 fontSettings
+      if (!fontSettings.customFonts) fontSettings.customFonts = [];
+      fontSettings.customFonts.push(newFont);
+      saveFontSettings();
+
+      // 清空输入
+      if (fileInput) fileInput.value = '';
+      if (nameEl)    nameEl.value = '';
+      document.getElementById('font-file-label-text').textContent = '选择字体文件…';
+
+      this._renderFontLibList();
+      this._renderFontSelects();
+      App.showToast(`字体「${label}」已添加`);
+    };
+    reader.onerror = () => App.showToast('文件读取失败');
+    reader.readAsDataURL(file);
+  },
+
   // ── 删除自定义字体 ──
   deleteCustomFont(id) {
+    // 若是本地字体，同步删除 IndexedDB 记录和注入的 style
+    const font = (fontSettings.customFonts || []).find(f => f.id === id);
+    if (font?.local) {
+      Store.delete('fonts', id).catch(e => console.warn('删除本地字体DB记录失败', e));
+      const styleEl = document.getElementById(`local-font-${id}`);
+      if (styleEl) styleEl.remove();
+      _injectedLocalFonts.delete(id);
+    }
     fontSettings.customFonts = (fontSettings.customFonts || []).filter(f => f.id !== id);
     // 若某槽正在用此字体，重置为默认
     ['slotTitle','slotBody','slotUi'].forEach(k => {
