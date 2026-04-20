@@ -2,7 +2,7 @@
    SW.JS - Service Worker
    ═══════════════════════════════════════ */
 
-const CACHE_NAME = 'soulreader-v0.3.7-beta';
+const CACHE_NAME = 'soulreader-v0.3.8-beta';
 
 // 动态计算 BASE：取 sw.js 所在目录，避免硬编码路径导致缓存 URL 与实际请求不匹配
 const BASE = self.location.pathname.replace(/\/sw\.js$/, '');
